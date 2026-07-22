@@ -1,0 +1,36 @@
+name: isl_app
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  provider: ^6.1.1
+  flutter_secure_storage: ^9.0.0
+  http: ^1.6.0
+  google_fonts: ^6.1.0
+  intl: ^0.18.1
+  cupertino_icons: ^1.0.8
+  dio: ^5.10.0
+  shared_preferences: ^2.5.5
+  url_launcher: ^6.3.2
+  file_picker: ^11.0.2
+  fl_chart: ^1.2.0
+  aad_oauth: ^1.0.1
+  speech_to_text: ^6.6.0
+  flutter_tts: ^4.2.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - lib/pictures/

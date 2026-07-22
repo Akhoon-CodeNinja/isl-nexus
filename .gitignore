@@ -1,0 +1,17 @@
+# Python/Django
+__pycache__/
+*.sqlite3
+.env
+
+# Flutter
+.dart_tool/
+build/
+.pub-cache/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# IDEs/OS
+.idea/
+.vscode/
+.DS_Store
