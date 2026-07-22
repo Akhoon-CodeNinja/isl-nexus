@@ -125,8 +125,3 @@ To run the entire stack containerized via Docker:
 docker compose up --build
 
 ```
-
-```
-
----
-```
