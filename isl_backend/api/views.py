@@ -55,7 +55,6 @@ def sync_vector_store():
     """
     docs = Document.objects.filter(
         is_active=True,
-        file_type=Document.FileType.PDF,
     )
     file_paths = [d.file_url.path for d in docs if d.file_url]
 
@@ -433,19 +432,16 @@ class DocumentViewSet(viewsets.ModelViewSet):
             return Document.objects.none()
             
         if user.role == 'DEPARTMENT_HEAD':
-            qs = Document.objects.all()
-            override = self.request.query_params.get('show_inactive')
-            if override is not None:
-                show_inactive = override.lower() == 'true'
-            else:
-                show_inactive = SystemSettings.load().show_inactive_by_default
-            if not show_inactive:
-                qs = qs.filter(is_active=True)
-            return qs
+            # Department Head ko portal mein hamesha saari files (Active + Inactive) nazar aayengi
+            # Taake portal par kuch bhi hide na ho aur manage karna asaan ho.
+            return Document.objects.all()
+            
         elif user.role == 'WORKER':
+            # Worker ko chatbot/app mein sirf uske department ki Active files nazar aayengi
             return Document.objects.filter(
                 departments__in=[user.department], is_active=True
             ).distinct()
+            
         return Document.objects.none()
 
     def perform_create(self, serializer):

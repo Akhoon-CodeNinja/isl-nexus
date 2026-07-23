@@ -7,7 +7,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from dotenv import load_dotenv
-
+from .rag_utils import _load_pages
 
 load_dotenv()
 
@@ -62,7 +62,8 @@ class ISLChatBotService:
         loaded_docs = []
         for path in file_paths:
             try:
-                loaded_docs.extend(PyPDFLoader(path).load())
+                # PyPDFLoader ki jagah apna custom loader use karein
+                loaded_docs.extend(_load_pages(path))
             except Exception as e:
                 # Ek kharab/corrupt file poore index ko fail na kare
                 print(f"[ISLChatBotService] Warning: could not load '{path}': {e}")

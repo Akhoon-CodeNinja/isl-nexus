@@ -30,9 +30,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   String _fullName = "Loading...";
   
-  // API se aane walay data ke liye variables
+  // Bar Chart Data
   List<Map<String, dynamic>> _chartData = [];
   bool _loadingChart = true;
+
+  // Real Data Variables for Dashboard Cards
+  int _totalDocs = 0, _activeDocs = 0, _inactiveDocs = 0, _pdfDocs = 0;
+  int _totalDepts = 0, _activeDepts = 0, _inactiveDepts = 0;
+  int _totalUsers = 0, _activeUsers = 0, _inactiveUsers = 0, _deptHeadUsers = 0, _workerUsers = 0;
+  int _totalActivities = 0, _docActivities = 0, _userActivities = 0, _systemActivities = 0;
+  bool _isLoadingStats = true;
 
   // Chart bars ke liye colors
   static const List<Color> _colorCycle = [
@@ -50,31 +57,121 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   void initState() {
     super.initState();
     _loadUserData();
-    _fetchChartData(); // Screen open hotay hi API call hogi
+    _fetchDashboardData(); 
   }
 
   Future<void> _loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
-    
-    // Fix: Direct 'name' key se data read karein jo ApiService save karti hai
     final name = prefs.getString('name');
 
-    if (name != null && name.isNotEmpty) {
-      if (mounted) {
-        setState(() {
-          _fullName = name;
-        });
-      }
-    } else {
-      if (mounted) {
-        setState(() {
-          _fullName = "Admin"; // Fallback agar naam na milay
-        });
-      }
+    if (mounted) {
+      setState(() {
+        _fullName = (name != null && name.isNotEmpty) ? name : "Admin";
+      });
     }
   }
 
-  // Yahan API se real data fetch ho raha hai chart ke liye
+  // Parallel API requests run karne ke liye naya function
+  Future<void> _fetchDashboardData() async {
+    setState(() {
+      _loadingChart = true;
+      _isLoadingStats = true;
+    });
+
+    // Dono functions ek sath parallel chalenge taake fast load ho
+    await Future.wait([
+      _fetchChartData(),
+      _fetchAllDashboardStats(),
+    ]);
+
+    if (mounted) {
+      setState(() {
+        _loadingChart = false;
+        _isLoadingStats = false;
+      });
+    }
+  }
+
+  // API se Real Stats (Cards ke liye)
+  Future<void> _fetchAllDashboardStats() async {
+    try {
+      // 1. Documents Stats Fetching
+      final docs = await _apiService.fetchDocuments();
+      int tDocs = docs.length;
+      int aDocs = docs.where((d) => d.isActive).length;
+      int pdf = docs.where((d) => d.type.toUpperCase().contains('PDF')).length;
+
+      // 2. Departments Stats Fetching
+      final depts = await _apiService.fetchDepartmentsRaw();
+      int tDepts = depts.length;
+      int aDepts = depts.where((d) {
+        final active = d['is_active'];
+        return active is bool ? active : true;
+      }).length;
+
+      // 3. Users Stats Fetching
+      final users = await _apiService.fetchUsersRaw();
+      int tUsers = users.length;
+      int aUsers = users.where((u) {
+        final active = u['is_active'];
+        return active is bool ? active : true;
+      }).length;
+      int dHeads = users.where((u) => (u['role'] ?? '').toString() == 'DEPARTMENT_HEAD').length;
+
+      // 4. Activity Logs Stats Fetching
+      final activityRaw = await _apiService.fetchActivityLogsRaw(page: 1);
+      int tActivities = 0;
+      List<dynamic> actResults = [];
+      
+      // Kyunke activityRaw hamesha Map hota hai, hum direct keys check karenge
+      if (activityRaw.containsKey('count')) {
+        tActivities = int.tryParse(activityRaw['count'].toString()) ?? 0;
+      }
+      
+      if (activityRaw.containsKey('results') && activityRaw['results'] is List) {
+        actResults = activityRaw['results'] as List<dynamic>;
+      } else if (activityRaw.containsKey('data') && activityRaw['data'] is List) {
+        actResults = activityRaw['data'] as List<dynamic>;
+      }
+
+      // First Page Breakdown Extrapolation
+      int tempDocs = 0, tempUsers = 0, tempSystem = 0;
+      for (var item in actResults) {
+        String mod = (item['entity_type'] ?? item['module'] ?? '').toString().toLowerCase();
+        if (mod.contains('document')) tempDocs++;
+        else if (mod.contains('user') || mod.contains('auth')) tempUsers++;
+        else tempSystem++;
+      }
+
+      if (mounted) {
+        setState(() {
+          _totalDocs = tDocs;
+          _activeDocs = aDocs;
+          _inactiveDocs = tDocs - aDocs;
+          _pdfDocs = pdf;
+
+          _totalDepts = tDepts;
+          _activeDepts = aDepts;
+          _inactiveDepts = tDepts - aDepts;
+
+          _totalUsers = tUsers;
+          _activeUsers = aUsers;
+          _inactiveUsers = tUsers - aUsers;
+          _deptHeadUsers = dHeads;
+          _workerUsers = tUsers - dHeads;
+
+          _totalActivities = tActivities;
+          _docActivities = tempDocs;
+          _userActivities = tempUsers;
+          _systemActivities = tempSystem;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error fetching dashboard stats: $e");
+    }
+  }
+
+  // Yahan API se real data fetch ho raha hai Bar chart ke liye
   Future<void> _fetchChartData() async {
     try {
       final rawData = await _apiService.fetchDepartmentsRaw();
@@ -92,15 +189,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       if (mounted) {
         setState(() {
           _chartData = loadedData;
-          _loadingChart = false;
         });
       }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _loadingChart = false;
-        });
-      }
+      debugPrint("Error loading chart data: $e");
     }
   }
 
@@ -415,13 +507,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ],
         ),
         const SizedBox(height: 16),
-        _buildRowItem("Total Uploaded", "2", Colors.blue.shade700),
+        _buildRowItem("Total Uploaded", _totalDocs.toString(), Colors.blue.shade700),
         const Divider(height: 16),
-        _buildRowItem("Active Documents", "2", Colors.green.shade700),
+        _buildRowItem("Active Documents", _activeDocs.toString(), Colors.green.shade700),
         const Divider(height: 16),
-        _buildRowItem("Inactive Documents", "0", Colors.orange.shade700),
+        _buildRowItem("Inactive Documents", _inactiveDocs.toString(), Colors.orange.shade700),
         const Divider(height: 16),
-        _buildRowItem("PDF Files", "2", Colors.red.shade700),
+        _buildRowItem("PDF Files", _pdfDocs.toString(), Colors.red.shade700),
         const SizedBox(height: 16),
         const Text("By File Type", style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold)),
         const SizedBox(height: 12),
@@ -429,17 +521,35 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           height: 120, 
           child: PieChart(
             PieChartData(
-              sectionsSpace: 0,
+              sectionsSpace: 2,
               centerSpaceRadius: 35,
-              sections: [
-                PieChartSectionData(
-                  color: Colors.red.shade400,
-                  value: 100,
-                  title: 'PDF',
-                  radius: 30,
-                  titleStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
-                ),
-              ],
+              sections: _totalDocs == 0
+                  ? [
+                      PieChartSectionData(
+                        color: Colors.grey.shade200,
+                        value: 100,
+                        title: '',
+                        radius: 30,
+                      )
+                    ]
+                  : [
+                      if (_pdfDocs > 0)
+                        PieChartSectionData(
+                          color: Colors.red.shade400,
+                          value: _pdfDocs.toDouble(),
+                          title: 'PDF',
+                          radius: 30,
+                          titleStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                      if ((_totalDocs - _pdfDocs) > 0)
+                        PieChartSectionData(
+                          color: Colors.blue.shade400,
+                          value: (_totalDocs - _pdfDocs).toDouble(),
+                          title: 'Other',
+                          radius: 30,
+                          titleStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                    ],
             ),
           ),
         ),
@@ -467,17 +577,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         const SizedBox(height: 6),
         Row(
           children: [
-            _PulsingDot(color: Colors.green, size: 10),
+            const _PulsingDot(color: Colors.green, size: 10),
             const SizedBox(width: 8),
             const Text("Synced", style: TextStyle(fontSize: 13, color: Colors.black87, fontWeight: FontWeight.w500)),
           ],
         ),
         const SizedBox(height: 16),
-        _buildBoxStat("2", "Total Documents", Icons.description_outlined, Colors.blue),
+        _buildBoxStat(_totalDocs.toString(), "Total Documents", Icons.description_outlined, Colors.blue),
         const SizedBox(height: 12),
-        _buildBoxStat("2", "Active Documents", Icons.check_circle_outline, Colors.green),
+        _buildBoxStat(_activeDocs.toString(), "Active Documents", Icons.check_circle_outline, Colors.green),
         const SizedBox(height: 12),
-        _buildBoxStat("0", "Inactive Documents", Icons.pause_circle_outline, Colors.orange),
+        _buildBoxStat(_inactiveDocs.toString(), "Inactive Documents", Icons.pause_circle_outline, Colors.orange),
         const SizedBox(height: 16),
         const Text("Last Sync", style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold)),
         const SizedBox(height: 6),
@@ -512,15 +622,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ],
         ),
         const SizedBox(height: 16),
-        _buildRowItem("Total Departments", "1", Colors.blue.shade700),
+        _buildRowItem("Total Departments", _totalDepts.toString(), Colors.blue.shade700),
         const Divider(height: 20),
-        _buildRowItem("Active Departments", "1", Colors.green.shade700),
+        _buildRowItem("Active Departments", _activeDepts.toString(), Colors.green.shade700),
         const Divider(height: 20),
-        _buildRowItem("Inactive Departments", "0", Colors.orange.shade700),
+        _buildRowItem("Inactive Departments", _inactiveDepts.toString(), Colors.orange.shade700),
         const Divider(height: 20),
-        _buildRowItem("Total Users", "3", Colors.indigo.shade700),
+        _buildRowItem("Total Users", _totalUsers.toString(), Colors.indigo.shade700),
         const Divider(height: 20),
-        _buildRowItem("Total Documents", "4", Colors.blue.shade700),
+        _buildRowItem("Total Documents", _totalDocs.toString(), Colors.blue.shade700),
       ],
     );
   }
@@ -535,13 +645,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       children: [
         const Text("Activity Overview", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
         const SizedBox(height: 16),
-        _buildBoxStat("15", "Total Activities", Icons.description_outlined, Colors.blue),
+        _buildBoxStat(_totalActivities.toString(), "Total Activities", Icons.description_outlined, Colors.blue),
         const SizedBox(height: 12),
-        _buildBoxStat("8", "Document Activities (Page)", Icons.insert_drive_file_outlined, Colors.green),
+        _buildBoxStat(_docActivities.toString(), "Document Activities (Page)", Icons.insert_drive_file_outlined, Colors.green),
         const SizedBox(height: 12),
-        _buildBoxStat("6", "User Activities (Page)", Icons.people_outline, Colors.orange),
+        _buildBoxStat(_userActivities.toString(), "User Activities (Page)", Icons.people_outline, Colors.orange),
         const SizedBox(height: 12),
-        _buildBoxStat("1", "System Activities (Page)", Icons.security_outlined, Colors.purple), 
+        _buildBoxStat(_systemActivities.toString(), "System Activities (Page)", Icons.security_outlined, Colors.purple), 
       ],
     );
   }
@@ -550,17 +660,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   // CARD 5: USER OVERVIEW
   // =======================================================================
   Widget _buildUserOverview() {
+    double dPct = _totalUsers == 0 ? 0 : (_deptHeadUsers / _totalUsers) * 100;
+    double wPct = _totalUsers == 0 ? 0 : (_workerUsers / _totalUsers) * 100;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         const Text("User Overview", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
         const SizedBox(height: 16),
-        _buildUserRowStat("3", "Total Users", Icons.person, Colors.blue),
+        _buildUserRowStat(_totalUsers.toString(), "Total Users", Icons.person, Colors.blue),
         const SizedBox(height: 12),
-        _buildUserRowStat("3", "Active Users", Icons.person, Colors.green),
+        _buildUserRowStat(_activeUsers.toString(), "Active Users", Icons.person, Colors.green),
         const SizedBox(height: 12),
-        _buildUserRowStat("0", "Inactive Users", Icons.person, Colors.grey),
+        _buildUserRowStat(_inactiveUsers.toString(), "Inactive Users", Icons.person, Colors.grey),
         const SizedBox(height: 20),
         const Text("Role Distribution", style: TextStyle(fontSize: 13, color: Colors.black87, fontWeight: FontWeight.bold)),
         const SizedBox(height: 12),
@@ -570,22 +683,33 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             PieChartData(
               sectionsSpace: 2,
               centerSpaceRadius: 35,
-              sections: [
-                PieChartSectionData(
-                  color: const Color(0xFF14B8A6), 
-                  value: 67,
-                  title: '67%',
-                  radius: 30,
-                  titleStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
-                ),
-                PieChartSectionData(
-                  color: const Color(0xFF1E3A8A), 
-                  value: 33,
-                  title: '33%',
-                  radius: 30,
-                  titleStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
-                ),
-              ],
+              sections: _totalUsers == 0
+                  ? [
+                      PieChartSectionData(
+                        color: Colors.grey.shade200,
+                        value: 100,
+                        title: '',
+                        radius: 30,
+                      )
+                    ]
+                  : [
+                      if (wPct > 0)
+                        PieChartSectionData(
+                          color: const Color(0xFF14B8A6), 
+                          value: wPct,
+                          title: '${wPct.toStringAsFixed(0)}%',
+                          radius: 30,
+                          titleStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                      if (dPct > 0)
+                        PieChartSectionData(
+                          color: const Color(0xFF1E3A8A), 
+                          value: dPct,
+                          title: '${dPct.toStringAsFixed(0)}%',
+                          radius: 30,
+                          titleStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                    ],
             ),
             swapAnimationDuration: const Duration(milliseconds: 800),
             swapAnimationCurve: Curves.easeOutCubic,
@@ -615,7 +739,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(label, style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
-        _CountUpText(count, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: countColor)),
+        _isLoadingStats 
+            ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2))
+            : _CountUpText(count, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: countColor)),
       ],
     );
   }
@@ -637,7 +763,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _CountUpText(count, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+                _isLoadingStats 
+                    ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
+                    : _CountUpText(count, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
                 const SizedBox(height: 2),
                 Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey), overflow: TextOverflow.ellipsis, maxLines: 1),
               ],
@@ -656,7 +784,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _CountUpText(count, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87)),
+            _isLoadingStats 
+                ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
+                : _CountUpText(count, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87)),
             Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
           ],
         )
