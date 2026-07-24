@@ -279,6 +279,10 @@ class Alert(UUIDModel):
         SAFETY = "SAFETY", "Safety"
         ANNOUNCEMENT = "ANNOUNCEMENT", "Announcement"
         MAINTENANCE = "MAINTENANCE", "Maintenance"
+        LEAVE_REQUEST = "LEAVE_REQUEST", "Leave Request"
+        # Nayi choices add kar di gayi hain:
+        SYSTEM = "SYSTEM", "System"
+        GENERAL = "GENERAL", "General"
 
     title = models.CharField(max_length=255)
     description = models.TextField()

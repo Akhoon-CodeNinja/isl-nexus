@@ -7,9 +7,11 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:isl_app/widgets/worker/worker_header.dart';
 import 'package:isl_app/widgets/worker/worker_bottom_nav.dart';
+import 'package:isl_app/widgets/worker/worker_shared_drawer.dart';
 import 'package:isl_app/views/worker/worker_chat_screen.dart';
 import 'package:isl_app/views/worker/worker_alerts_screen.dart';
 import 'package:isl_app/views/worker/worker_profile_screen.dart';
+import 'package:isl_app/core/services/api_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WORKER DOCUMENTS SCREEN
@@ -180,18 +182,58 @@ class _WorkerDocumentsScreenState extends State<WorkerDocumentsScreen> {
 
   // ── Document Actions (View / Download) ────────────────────────────────────
   Future<void> _handleDocumentAction(String documentId, String action) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('access_token') ?? '';
-    
-    // The backend views.py uses these endpoints with a token in the URL for inline viewing/downloading
-    final url = Uri.parse('$_baseUrl/documents/$documentId/$action/?token=$token');
-    
-    if (await canLaunchUrl(url)) {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
-    } else {
+    try {
+      // 1. URL open karne se pehle settings check karein
+      final settings = await ApiService().fetchSettings();
+      
+      // Agar view click kiya aur preview disabled hai
+      if (action == 'view' && settings['enable_file_preview'] == false) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Department Head has not allowed document previews.', style: TextStyle(color: Colors.white)),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return; // Yahan ruk jayega, browser open nahi hoga
+      }
+
+      // Agar download click kiya aur downloads disabled hain
+      if (action == 'download' && settings['allow_worker_downloads'] == false) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Department Head has not allowed document downloads.', style: TextStyle(color: Colors.white)),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return; // Yahan ruk jayega, browser open nahi hoga
+      }
+
+      // 2. Agar allowed hai toh normal URL launch karein
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('access_token') ?? '';
+      
+      final url = Uri.parse('$_baseUrl/documents/$documentId/$action/?token=$token');
+      
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not open the document URL.')),
+          );
+        }
+      }
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open the document URL.')),
+          const SnackBar(
+            content: Text('Could not verify permissions. Please try again.', style: TextStyle(color: Colors.white)),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -243,6 +285,7 @@ class _WorkerDocumentsScreenState extends State<WorkerDocumentsScreen> {
 
     return Scaffold(
       backgroundColor: Colors.white,
+      drawer: buildSharedWorkerDrawer(context),
       body: SafeArea(
         bottom: false,
         child: Column(
@@ -495,7 +538,7 @@ class _WorkerDocumentsScreenState extends State<WorkerDocumentsScreen> {
     );
   }
 
-  // ── All Documents vertical list ────────────────────────────────────────────
+ // ── All Documents vertical list ────────────────────────────────────────────
   Widget _buildAllDocsList(List<dynamic> docs) {
     return ListView.separated(
       physics: const NeverScrollableScrollPhysics(),
@@ -506,7 +549,7 @@ class _WorkerDocumentsScreenState extends State<WorkerDocumentsScreen> {
       itemBuilder: (_, i) => _AllDocRow(
         doc: docs[i],
         onView: () => _handleDocumentAction(docs[i]['id'].toString(), 'view'),
-        onDownload: () => _handleDocumentAction(docs[i]['id'].toString(), 'download'),
+        // Download action yahan se completely hata diya gaya hai
       ),
     );
   }
@@ -636,11 +679,10 @@ class _RecentDocCard extends StatelessWidget {
 // ALL DOCUMENTS ROW ITEM
 // ─────────────────────────────────────────────────────────────────────────────
 class _AllDocRow extends StatelessWidget {
-  const _AllDocRow({required this.doc, required this.onView, required this.onDownload});
+  const _AllDocRow({required this.doc, required this.onView}); // onDownload removed
   
   final dynamic doc;
   final VoidCallback onView;
-  final VoidCallback onDownload;
 
   @override
   Widget build(BuildContext context) {
@@ -693,8 +735,7 @@ class _AllDocRow extends StatelessWidget {
           Row(
             children: [
               _IconBtn(icon: Icons.remove_red_eye_outlined, onTap: onView),
-              const SizedBox(width: 6),
-              _IconBtn(icon: Icons.download_outlined, onTap: onDownload),
+              // Download ka icon button yahan se completely hata diya gaya hai
             ],
           ),
         ],

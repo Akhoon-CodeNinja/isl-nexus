@@ -13,7 +13,6 @@ import 'package:isl_app/widgets/auth/auth_text_field.dart';
 import 'package:isl_app/widgets/auth/auth_buttons.dart';
 import 'package:isl_app/core/utils/globals.dart';
 
-
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -31,13 +30,13 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _loading = false;
 
   // --- MICROSOFT OAUTH CONFIGURATION ---
-static final aad.Config oauthConfig = aad.Config(
-  tenant: 'common',
-  clientId: 'YOUR_AZURE_CLIENT_ID',
-  scope: 'openid profile email User.Read',
-  redirectUri: 'https://login.live.com/oauth20_desktop.srf',
-  navigatorKey: appNavigatorKey,
-);
+  static final aad.Config oauthConfig = aad.Config(
+    tenant: 'common',
+    clientId: 'YOUR_AZURE_CLIENT_ID',
+    scope: 'openid profile email User.Read',
+    redirectUri: 'https://login.live.com/oauth20_desktop.srf',
+    navigatorKey: appNavigatorKey,
+  );
 
   // Built lazily rather than as an eager field initializer. AadOAuth's
   // web implementation touches the browser's MSAL JS SDK (window.msal)
@@ -122,10 +121,10 @@ static final aad.Config oauthConfig = aad.Config(
 
   Future<String?> _getMicrosoftAccessToken() async {
     try {
-      // Login ka popup/screen open karega
+      // Opens the Microsoft login popup/screen
       await oauth.login();
       
-      // Successful login k baad token get karega
+      // Retrieves the access token after a successful login
       final String? accessToken = await oauth.getAccessToken();
       
       if (accessToken != null) {

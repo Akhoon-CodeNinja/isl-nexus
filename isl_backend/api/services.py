@@ -1,4 +1,5 @@
 import os
+import re
 from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -33,13 +34,51 @@ class ISLChatBotService:
             self.vector_store = FAISS.load_local(self.vector_store_path, self.embeddings, allow_dangerous_deserialization=True)
 
     # Har prompt ke sath yeh common language rule attach hota hai, taake model
-    # kabhi Hindi (Devanagari) ya plain English mein jawab na de.
+    # kabhi Hindi (Devanagari) ya plain English mein jawab na de. Ye rule
+    # sirf general nahi -- kuch commonly-leaking Hindi words explicitly
+    # ban kiye gaye hain, kyunke model general instruction ke bawajood
+    # kabhi kabhi "kripya" jaisay Hindi-origin lafz istemal kar leta tha.
     _LANGUAGE_RULE = (
         "STRICT LANGUAGE RULE: You must respond ONLY in Roman Urdu (Urdu language "
         "written in Latin/English script) or in Urdu script. NEVER respond in Hindi "
         "or Devanagari script, and never respond in plain English. This rule has no "
-        "exceptions, even if the user writes in English or Hindi."
+        "exceptions, even if the user writes in English or Hindi.\n"
+        "In particular, NEVER use these Hindi-origin words -- always use the Urdu "
+        "word given instead:\n"
+        "- 'kripya' -> use 'baraye meherbani' or 'baraye karam'\n"
+        "- 'dhanyawad' -> use 'shukriya'\n"
+        "- 'aap ka swagat hai' -> use 'khushamdeed' or 'jee aya nu'\n"
+        "- 'maaf kijiye' -> use 'maazrat' or 'maaf keejiye ga'\n"
+        "- 'sahayata' -> use 'madad'\n"
+        "- 'jaankari' -> use 'maloomat'\n"
+        "- 'prashn' -> use 'sawal'"
     )
+
+    # Deterministic safety net: even with the prompt rule above, the model
+    # can occasionally slip a Hindi word in. This regex-replaces known
+    # Hindi-origin words with their Urdu equivalent in every final answer,
+    # so the guarantee doesn't rely on the LLM alone.
+    _HINDI_TO_URDU_REPLACEMENTS = {
+        r"\bkripya\b": "baraye karam",
+        r"\bkripaya\b": "baraye karam",
+        r"\bdhanyawad\b": "shukriya",
+        r"\bdhanyavaad\b": "shukriya",
+        r"\bmaaf kijiye\b": "maazrat",
+        r"\bsahayata\b": "madad",
+        r"\bjaankari\b": "maloomat",
+        r"\bprashn\b": "sawal",
+    }
+
+    @classmethod
+    def _sanitize_hindi_words(cls, text: str) -> str:
+        """Final pass on every bot reply: replaces any Hindi-origin words
+        that slipped through with their Urdu equivalent. Case-insensitive,
+        preserves the original word's capitalization pattern loosely by
+        just using the replacement as-is (replacements are short/common
+        enough that this reads naturally either way)."""
+        for pattern, replacement in cls._HINDI_TO_URDU_REPLACEMENTS.items():
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+        return text
 
     def rebuild_index_from_paths(self, file_paths: list) -> None:
         """
@@ -83,10 +122,11 @@ class ISLChatBotService:
         self.vector_store.save_local(self.vector_store_path)
 
     def _semantic_router(self, query: str) -> str:
-        """Query ka intent samajhta hai: COMPANY, GREETING ya OFF_TOPIC"""
+        """Query ka intent samajhta hai: LEAVE_REQUEST, COMPANY, GREETING ya OFF_TOPIC"""
         router_prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a strict classification AI for Industrial Solutions Ltd (ISL).
             Categorize the query into EXACTLY ONE of these categories:
+            - 'LEAVE_REQUEST': If the user wants to apply for, request, or ask about taking leave/chutti/off from work — in any wording (e.g. "leave chahiye", "mujhe chutti chahiye", "leave apply karni hai", "I want to apply for sick leave", "kal chutti karni hai"). This takes priority over COMPANY.
             - 'COMPANY': If it could plausibly relate to ISL's workplace in any way — company documents, policies, workers, departments, safety, HR, equipment, machines, facilities, procedures, manuals, or any specific ISL guideline. This includes questions about specific equipment/machines/systems (e.g. vending machines, boilers, safety gear) even if "ISL" or "company" is not explicitly mentioned, since these are commonly covered in internal manuals.
             - 'GREETING': If it is only a greeting or small talk directed at the assistant (hi, hello, salam, thank you, how are you, aap kon hain).
             - 'OFF_TOPIC': Only for topics that clearly cannot relate to a workplace at all — general knowledge trivia, other companies, coding help, entertainment, personal advice, celebrities, politics, etc.
@@ -99,6 +139,8 @@ class ISLChatBotService:
         chain = router_prompt | self.llm | StrOutputParser()
         result = chain.invoke({"query": query}).strip().upper()
 
+        if "LEAVE_REQUEST" in result or "LEAVE REQUEST" in result:
+            return "LEAVE_REQUEST"
         if "COMPANY" in result:
             return "COMPANY"
         if "GREETING" in result:
@@ -150,6 +192,26 @@ class ISLChatBotService:
         chain = greeting_prompt | self.llm | StrOutputParser()
         return chain.invoke({"query": query})
 
+    def _handle_leave_request(self, query: str) -> str:
+        """User leave/chutti maang raha hai. Seedha submit nahi karte -- pehle
+        confirm karte hain, taake accidental/misread intent par leave apply
+        na ho jaye. Actual submission ChatAskView se /api/leave/apply/ ke
+        zariye, frontend ke leave-form ke through hoti hai (is method mein
+        nahi), taake leave type aur reason properly structured collect ho.
+        """
+        confirm_prompt = ChatPromptTemplate.from_messages([
+            ("system", f"""You are the ISL Assistant for Industrial Solutions Ltd (ISL).
+            The user wants to apply for leave. Respond briefly and warmly, confirming
+            that you can prepare and submit a leave application for them right now,
+            and that they should select the leave type and provide a short reason
+            in the form that will appear below.
+
+            {self._LANGUAGE_RULE}"""),
+            ("user", "{query}")
+        ])
+        chain = confirm_prompt | self.llm | StrOutputParser()
+        return chain.invoke({"query": query})
+
     def _handle_off_topic(self, query: str) -> str:
         """ISL se related na hone wale sawalat ko politely refuse karta hai"""
         off_topic_prompt = ChatPromptTemplate.from_messages([
@@ -165,13 +227,23 @@ class ISLChatBotService:
         chain = off_topic_prompt | self.llm | StrOutputParser()
         return chain.invoke({"query": query})
 
-    def process_query(self, query: str) -> str:
-        """Main Pipeline"""
+    def process_query(self, query: str) -> dict:
+        """Main Pipeline.
+
+        Returns a dict {"answer": str, "intent": str} instead of a bare
+        string, so the caller (ChatAskView) knows when to trigger the
+        leave-application form on the frontend (intent == 'LEAVE_REQUEST').
+        """
         intent = self._semantic_router(query)
 
-        if intent == "COMPANY":
-            return self._handle_company_query(query)
+        if intent == "LEAVE_REQUEST":
+            answer = self._handle_leave_request(query)
+        elif intent == "COMPANY":
+            answer = self._handle_company_query(query)
         elif intent == "GREETING":
-            return self._handle_greeting(query)
+            answer = self._handle_greeting(query)
         else:
-            return self._handle_off_topic(query)
+            answer = self._handle_off_topic(query)
+
+        answer = self._sanitize_hindi_words(answer)
+        return {"answer": answer, "intent": intent}

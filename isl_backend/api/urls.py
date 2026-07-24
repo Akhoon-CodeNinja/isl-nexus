@@ -3,12 +3,14 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 from .views import (
     CustomTokenObtainPairView, MeView, DepartmentViewSet, DocumentViewSet, 
-    TagViewSet, AlertViewSet, ChatSessionViewSet, ChatMessageViewSet,
+    TagViewSet, AlertViewSet, ChatMessageViewSet,
     UserViewSet, AuditLogViewSet, SystemSettingsView, MicrosoftLoginView
 )
 
-from .views import ChatAskView
+from .views import ChatAskView, ChatHistoryView, LeaveApplicationView
+from .views import ChatNewSessionView, ChatSessionListView
 
+from .views import ChatNewSessionView, ChatSessionListView, ChatSessionDetailView 
 
 
 router = DefaultRouter()
@@ -19,7 +21,6 @@ router.register(r'departments', DepartmentViewSet, basename='department')
 router.register(r'documents', DocumentViewSet, basename='document')
 router.register(r'tags', TagViewSet, basename='tag')
 router.register(r'alerts', AlertViewSet, basename='alert')
-router.register(r'chat-sessions', ChatSessionViewSet, basename='chatsession')
 router.register(r'chat-messages', ChatMessageViewSet, basename='chatmessage')
 router.register(r'users', UserViewSet, basename='user')
 router.register(r'audit-logs', AuditLogViewSet, basename='auditlog')
@@ -32,4 +33,10 @@ urlpatterns = [
     path('settings/', SystemSettingsView.as_view(), name='system-settings'),
     path('', include(router.urls)),
     path('chat/ask/', ChatAskView.as_view(), name='chat_ask'),
+    path('chat/history/', ChatHistoryView.as_view(), name='chat_history'),
+    # NEW: sidebar "New chat" button + "Recent" chats list.
+    path('chat/session/new/', ChatNewSessionView.as_view(), name='chat_new_session'),
+    path('chat/sessions/', ChatSessionListView.as_view(), name='chat_sessions'),
+    path('chat/sessions/<str:session_id>/', ChatSessionDetailView.as_view(), name='chat_session_detail'),
+    path('leave/apply/', LeaveApplicationView.as_view(), name='leave_apply'),
 ]

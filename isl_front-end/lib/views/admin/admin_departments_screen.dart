@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:fl_chart/fl_chart.dart'; // Chart ke liye import add kiya hai
+import 'package:fl_chart/fl_chart.dart'; // Added import for charts
 import 'package:isl_app/core/services/api_service.dart';
 import 'package:isl_app/widgets/admin/admin_sidebar.dart';
 import 'package:isl_app/widgets/admin/admin_top_header.dart';
@@ -704,7 +704,6 @@ class _AdminDepartmentsScreenState extends State<AdminDepartmentsScreen> {
   }
 
   // Bar Chart Widget Method
-  // Bar Chart Widget Method
   Widget _buildBarChartSection() {
     double maxY = 10; // Default max Y axis limit
     if (departmentsList.isNotEmpty) {
@@ -845,7 +844,7 @@ class _AdminDepartmentsScreenState extends State<AdminDepartmentsScreen> {
                           dashArray: [4, 4], // Dotted horizontal lines for grid
                         ),
                       ),
-                      // YAHAN FIX KIYA GAYA HAI: Boundaries ko show kar diya gaya hai
+                      // FIX APPLIED: Boundaries have been enabled
                       borderData: FlBorderData(
                         show: true,
                         border: Border(

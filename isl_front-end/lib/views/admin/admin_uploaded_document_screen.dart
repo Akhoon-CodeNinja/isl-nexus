@@ -1,374 +1,352 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:isl_app/core/models/document_models.dart';
-import 'package:isl_app/core/services/api_service.dart';
-import 'package:isl_app/views/admin/admin_upload_document_screen.dart';
 import 'package:isl_app/widgets/admin/admin_sidebar.dart';
 import 'package:isl_app/widgets/admin/admin_top_header.dart';
-import 'package:fl_chart/fl_chart.dart';
+import 'package:isl_app/views/admin/admin_documents_screen.dart'; 
 
-// --- DATA MODEL ---
-class DashboardDocModel {
-  final String id;
-  String title; 
-  String docNumber; 
-  final String type;
-  final String department;
-  final String version;
-  final String updatedAt;
-  final String uploadedByName;
-  final String uploadedByInitials;
-  bool isActive;
-  bool isSelected;
-
-  DashboardDocModel({
-    required this.id,
-    required this.title,
-    required this.docNumber,
-    required this.type,
-    required this.department,
-    required this.version,
-    required this.updatedAt,
-    required this.uploadedByName,
-    required this.uploadedByInitials,
-    required this.isActive,
-    this.isSelected = false,
-  });
-}
-
-// --- MAIN SCREEN ---
 class AdminUploadedDocumentScreen extends StatefulWidget {
   const AdminUploadedDocumentScreen({super.key});
 
   @override
-  State<AdminUploadedDocumentScreen> createState() => _AdminUploadedDocumentScreenState();
+  State<AdminUploadedDocumentScreen> createState() =>
+      _AdminUploadedDocumentScreenState();
 }
 
 class _AdminUploadedDocumentScreenState extends State<AdminUploadedDocumentScreen> {
+  // Brand Colors
   final Color sidebarColor = const Color(0xFF0F294D);
   final Color primaryBlue = const Color(0xFF163E75);
   final Color bgLight = const Color(0xFFF8FAFC);
   final Color borderLight = Colors.grey.shade200;
 
-  List<DashboardDocModel> allMyDocuments = [];
-  List<DashboardDocModel> documentsList = [];
+  // Form Controllers
+  final TextEditingController _titleCtrl = TextEditingController();
+  final TextEditingController _docNumberCtrl =
+      TextEditingController(); // Replacing Description with Document Number
+  final TextEditingController _versionCtrl = TextEditingController();
 
-  bool isAllSelected = false;
-  bool _isLoading = false;
-  String? _errorMessage;
+  // Backend Data Lists
+  List<dynamic> _departmentsList = [];
+  List<dynamic> _categoriesList = [];
 
-  String _fullName = "Loading...";
-  String _employeeId = "";
-  String _role = "";
-  String _userDepartment = "IT";
+  // Selected Values (Storing UUIDs for API)
+  // Multi-department documents: a document can now be linked to more than
+  // one department, so the actual selection lives in this Set. _selectedDeptId
+  // is kept alongside it as the "primary" department (the first one picked) —
+  // that's what drives the Document Category (Tag) dropdown, since tags are
+  // still scoped to a single department on the backend.
+  final Set<String> _selectedDeptIds = {};
+  String? _selectedDeptId;
+  String? _selectedCategoryId;
+  String? _selectedFileType; // 'PDF' or 'DOCX'
 
-  String _searchQuery = '';
-  
-  // Dynamic Pagination State
-  int _itemsPerPage = 10;
-  int _currentPage = 1;
+  bool _isActive = true;
+  PlatformFile? _pickedFile;
 
-  // --- Real-time Stats Variables ---
-  int _totalUploads = 0;
-  int _activeUploads = 0;
-  int _inactiveUploads = 0;
-  int _pdfUploads = 0;
+  bool _isFetchingData = true;
+  bool _isFetchingTags = false;
+  bool _isUploading = false;
 
   @override
   void initState() {
     super.initState();
-    _initializeData();
+    _fetchDropdownData();
   }
 
-  Future<void> _initializeData() async {
-    await _loadUserData();
-    await _fetchDocuments();
+  // --- API 1: FETCH DEPARTMENTS ---
+  Future<void> _fetchDropdownData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token =
+          prefs.getString('access_token') ?? prefs.getString('token') ?? '';
+      final headers = {
+        'Authorization': 'Bearer $token',
+        'Accept': 'application/json',
+      };
+
+      final deptRes = await http.get(
+        Uri.parse('http://127.0.0.1:8000/api/departments/'),
+        headers: headers,
+      );
+
+      if (deptRes.statusCode == 200) {
+        var deptData = jsonDecode(deptRes.body);
+        setState(() {
+          _departmentsList = deptData is Map && deptData.containsKey('results')
+              ? deptData['results']
+              : deptData;
+          _isFetchingData = false;
+        });
+      } else {
+        _showSnackBar(
+          "Failed to load departments from server.",
+          isError: true,
+        );
+        setState(() => _isFetchingData = false);
+      }
+    } catch (e) {
+      _showSnackBar("Error connecting to server.", isError: true);
+      setState(() => _isFetchingData = false);
+    }
   }
 
-  Future<void> _loadUserData() async {
-    final prefs = await SharedPreferences.getInstance();
+  // --- API 1b: FETCH TAGS (CATEGORIES) FOR THE SELECTED DEPARTMENT ---
+  // Tags are department-scoped on the backend (Tag.unique_together =
+  // ('name', 'department')), so the category list has to be re-fetched
+  // for whichever department the admin picks here — it can't just load
+  // once at page-open using the logged-in admin's own department, which
+  // is what caused "No items available" whenever that didn't match the
+  // department being uploaded to.
+  Future<void> _fetchTagsForDepartment(String departmentId) async {
+    setState(() {
+      _isFetchingTags = true;
+      _categoriesList = [];
+      _selectedCategoryId = null; // old selection may not belong to this dept
+    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token =
+          prefs.getString('access_token') ?? prefs.getString('token') ?? '';
+      final headers = {
+        'Authorization': 'Bearer $token',
+        'Accept': 'application/json',
+      };
 
-    // Fix: Direct keys se properly data load karein
-    final savedDept = prefs.getString('department');
-    _userDepartment = (savedDept != null && savedDept.isNotEmpty) ? savedDept : 'IT';
-    
-    final name = prefs.getString('name');
-    final empId = prefs.getString('user_id'); 
-    final role = prefs.getString('role');
+      final tagRes = await http.get(
+        Uri.parse('http://127.0.0.1:8000/api/tags/?department=$departmentId'),
+        headers: headers,
+      );
 
-    if (mounted) {
+      if (tagRes.statusCode == 200) {
+        var tagData = jsonDecode(tagRes.body);
+        setState(() {
+          _categoriesList = tagData is Map && tagData.containsKey('results')
+              ? tagData['results']
+              : tagData;
+          _isFetchingTags = false;
+        });
+      } else {
+        _showSnackBar("Failed to load categories for this department.", isError: true);
+        setState(() => _isFetchingTags = false);
+      }
+    } catch (e) {
+      _showSnackBar("Error loading categories.", isError: true);
+      setState(() => _isFetchingTags = false);
+    }
+  }
+
+  // --- FILE PICKER LOGIC ---
+  Future<void> _pickFile() async {
+    FilePickerResult? result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf', 'doc', 'docx', 'xls', 'xlsx'],
+      withData: true, // ensures .bytes is populated on Web
+    );
+
+    if (result != null) {
       setState(() {
-        if (name != null && name.isNotEmpty) _fullName = name;
-        if (empId != null && empId.isNotEmpty) _employeeId = empId;
-        if (role != null && role.isNotEmpty) _role = role;
+        _pickedFile = result.files.first;
+
+        // Auto-detect file type for dropdown based on extension
+        String ext = _pickedFile!.extension?.toLowerCase() ?? '';
+        if (ext == 'pdf') {
+          _selectedFileType = 'PDF';
+        } else if (ext == 'doc' || ext == 'docx') {
+          _selectedFileType = 'DOCX';
+        } else if (ext == 'xls' || ext == 'xlsx') {
+          _selectedFileType = 'XLSX';
+        }
       });
     }
   }
 
-  bool _isAuthorizedToDelete(String docDepartment) {
-    String dDept = docDepartment.toUpperCase().trim();
-    String uDept = _userDepartment.toUpperCase().trim();
+  // --- API 2: UPLOAD DOCUMENT ---
+  Future<void> _uploadDocument() async {
+    // 1. Validation
+    if (_titleCtrl.text.trim().isEmpty)
+      return _showSnackBar("Please enter Document Title.", isError: true);
+    if (_docNumberCtrl.text.trim().isEmpty)
+      return _showSnackBar("Please enter Document Number.", isError: true);
+    if (_selectedDeptIds.isEmpty)
+      return _showSnackBar("Please select at least one Department.", isError: true);
+    if (_selectedFileType == null)
+      return _showSnackBar("Please select a File Type.", isError: true);
+    if (_pickedFile == null)
+      return _showSnackBar("Please attach a file.", isError: true);
 
-    if (dDept == 'INFORMATION TECHNOLOGY') dDept = 'IT';
-    if (uDept == 'INFORMATION TECHNOLOGY') uDept = 'IT';
-    
-    if (dDept == 'HUMAN RESOURCES') dDept = 'HR';
-    if (uDept == 'HUMAN RESOURCES') uDept = 'HR';
-
-    return dDept == uDept || dDept.contains(uDept) || uDept.contains(dDept);
-  }
-
-  int _pdfCount = 0;
-  int _xlsCount = 0;
-  int _otherCount = 0;
-
-  void _calculateStats() {
-    setState(() {
-      _totalUploads = allMyDocuments.length;
-      // Categories count
-      _pdfCount = allMyDocuments.where((doc) => doc.type.toUpperCase().contains('PDF')).length;
-      _xlsCount = allMyDocuments.where((doc) => doc.type.toUpperCase().contains('XLS')).length;
-      _otherCount = _totalUploads - (_pdfCount + _xlsCount); 
-
-      // NOTE: these three were declared but never assigned before — the
-      // Overview panel's "Active Documents", "Inactive Documents", and
-      // "PDF Files" rows always showed 0 regardless of real data.
-      _activeUploads = allMyDocuments.where((doc) => doc.isActive).length;
-      _inactiveUploads = _totalUploads - _activeUploads;
-      _pdfUploads = _pdfCount;
-    });
-}
-
-  Future<void> _fetchDocuments() async {
-    if (!mounted) return;
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+    setState(() => _isUploading = true);
 
     try {
-      final apiService = ApiService();
-      final items = await apiService.fetchDocuments();
+      final prefs = await SharedPreferences.getInstance();
+      final token =
+          prefs.getString('access_token') ?? prefs.getString('token') ?? '';
 
-      if (!mounted) return;
-
-      final myItems = items.where((item) {
-        String uName = item.uploadedByName.trim().toLowerCase();
-        String myName = _fullName.trim().toLowerCase();
-
-        if (uName.isEmpty || myName.isEmpty) return false;
-        
-        return uName == myName || uName.contains(myName) || myName.contains(uName);
-      }).toList();
-
-      setState(() {
-        allMyDocuments = myItems
-            .map(
-              (item) => DashboardDocModel(
-                id: item.id,
-                title: item.title,
-                docNumber: item.documentNumber,
-                type: item.type,
-                department: item.department,
-                version: item.version,
-                updatedAt: item.updatedAt,
-                uploadedByName: item.uploadedByName,
-                uploadedByInitials: _getInitials(item.uploadedByName),
-                isActive: item.isActive,
-                isSelected: false,
-              ),
-            )
-            .toList();
-
-        _applyFilters();
-        _calculateStats(); // Calculate stats immediately after fetch
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        documentsList = [];
-        _errorMessage = e.toString();
-      });
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  void _applyFilters() {
-    List<DashboardDocModel> filtered = List.from(allMyDocuments);
-
-    if (_searchQuery.isNotEmpty) {
-      filtered = filtered.where((doc) {
-        return doc.title.toLowerCase().contains(_searchQuery) ||
-            doc.docNumber.toLowerCase().contains(_searchQuery) ||
-            doc.department.toLowerCase().contains(_searchQuery);
-      }).toList();
-    }
-
-    filtered.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-
-    setState(() {
-      documentsList = filtered;
-      isAllSelected = false;
-      _currentPage = 1; 
-      for (var doc in documentsList) {
-        doc.isSelected = false;
-      }
-    });
-  }
-
-  List<DashboardDocModel> get _paginatedDocuments {
-    final startIndex = (_currentPage - 1) * _itemsPerPage;
-    final endIndex = startIndex + _itemsPerPage;
-    if (startIndex >= documentsList.length) return [];
-    return documentsList.sublist(
-        startIndex, endIndex > documentsList.length ? documentsList.length : endIndex);
-  }
-
-  int get _totalPages => (documentsList.length / _itemsPerPage).ceil();
-
-  void _handleBulkAction(String action) {
-    final selectedDocs = documentsList.where((d) => d.isSelected).toList();
-    if (selectedDocs.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select at least one document first.')),
+      var request = http.MultipartRequest(
+        'POST',
+        Uri.parse('http://127.0.0.1:8000/api/documents/'),
       );
-      return;
-    }
+      request.headers.addAll({'Authorization': 'Bearer $token'});
 
-    if (action == 'delete') {
-      bool hasUnauthorizedDocs = selectedDocs.any((d) => !_isAuthorizedToDelete(d.department));
+      // Map Text Fields — names must match the Django serializer exactly
+      request.fields['title'] = _titleCtrl.text.trim();
+      request.fields['doc_number'] = _docNumberCtrl.text.trim();
+      request.fields['file_type'] = _selectedFileType!;
+      request.fields['version'] = _versionCtrl.text.trim().isEmpty
+          ? '1.0'
+          : _versionCtrl.text.trim();
+      request.fields['is_active'] = _isActive ? 'True' : 'False';
+      // Comma-separated list of department IDs — the backend
+      // (DocumentViewSet.perform_create) splits this and links the
+      // document to every department named here, so all of their
+      // employees can see it once it's active.
+      request.fields['departments'] = _selectedDeptIds.join(',');
 
-      if (hasUnauthorizedDocs) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Permission Denied: You can only delete files belonging to your department.'),
-            backgroundColor: Colors.red,
+      if (_selectedCategoryId != null) {
+        request.fields['tag_ids'] = _selectedCategoryId!; // was 'tags'
+      }
+
+      // Handle File Attach (Works for Web & Mobile)
+      if (_pickedFile!.bytes != null) {
+        request.files.add(
+          http.MultipartFile.fromBytes(
+            'file_url',
+            _pickedFile!.bytes!,
+            filename: _pickedFile!.name,
           ),
         );
-        return;
+      } else if (_pickedFile!.path != null) {
+        request.files.add(
+          await http.MultipartFile.fromPath('file_url', _pickedFile!.path!),
+        );
+      } else {
+        // Neither bytes nor path available — surfaces instantly instead
+        // of silently sending a file-less request.
+        throw Exception(
+          'Selected file has no readable data (bytes/path both null).',
+        );
       }
+
+      var response = await request.send();
+
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        _showSnackBar("Document Uploaded Successfully!", isError: false);
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const AdminDocumentsScreen()),
+          );
+        }
+      } else {
+        String resBody = await response.stream.bytesToString();
+        debugPrint('UPLOAD FAILED (${response.statusCode}): $resBody');
+        _showSnackBar(
+          "Upload Failed (${response.statusCode}): $resBody",
+          isError: true,
+        );
+      }
+    } catch (e, stack) {
+      debugPrint('UPLOAD ERROR: $e');
+      debugPrint('$stack');
+      _showSnackBar("Upload error: $e", isError: true);
+    } finally {
+      if (mounted) setState(() => _isUploading = false);
     }
+  }
 
-    setState(() {
-      for (var doc in selectedDocs) {
-        if (action == 'activate') doc.isActive = true;
-        if (action == 'deactivate') doc.isActive = false;
+  // --- ADD NEW CATEGORY (TAG) FOR THE SELECTED DEPARTMENT ---
+  // This is what actually unblocks the Category dropdown when a
+  // department has zero tags yet — without it, "No categories for this
+  // department" was a dead end with no way forward from this screen.
+  Future<void> _showAddCategoryDialog() async {
+    final nameCtrl = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text("New Document Category"),
+          content: TextField(
+            controller: nameCtrl,
+            autofocus: true,
+            decoration: const InputDecoration(
+              hintText: "e.g. Safety Procedures",
+              border: OutlineInputBorder(),
+            ),
+            onSubmitted: (v) => Navigator.pop(dialogContext, v.trim()),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(dialogContext, nameCtrl.text.trim()),
+              style: ElevatedButton.styleFrom(backgroundColor: primaryBlue),
+              child: const Text("Add", style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (result != null && result.isNotEmpty) {
+      await _createTag(result);
+    }
+  }
+
+  Future<void> _createTag(String name) async {
+    if (_selectedDeptId == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token =
+          prefs.getString('access_token') ?? prefs.getString('token') ?? '';
+      final headers = {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      };
+
+      final res = await http.post(
+        Uri.parse('http://127.0.0.1:8000/api/tags/'),
+        headers: headers,
+        body: jsonEncode({'name': name, 'department': _selectedDeptId}),
+      );
+
+      if (res.statusCode == 201) {
+        final created = jsonDecode(res.body);
+        setState(() {
+          _categoriesList = [..._categoriesList, created];
+          _selectedCategoryId = created['id'].toString();
+        });
+        _showSnackBar("Category '$name' added.", isError: false);
+      } else {
+        // Surfaces backend validation errors directly, e.g. a duplicate
+        // name for this department (Tag.unique_together).
+        _showSnackBar("Could not add category: ${res.body}", isError: true);
       }
+    } catch (e) {
+      _showSnackBar("Error adding category: $e", isError: true);
+    }
+  }
 
-      if (action == 'delete') {
-        documentsList.removeWhere((d) => d.isSelected);
-        allMyDocuments.removeWhere((d) => selectedDocs.any((sd) => sd.id == d.id));
-      }
-
-      isAllSelected = false;
-      for (var doc in documentsList) {
-        doc.isSelected = false;
-      }
-      
-      _calculateStats(); // Recalculate stats after bulk action
-    });
-
-    String actionName = action == 'activate' ? 'activated' : action == 'deactivate' ? 'deactivated' : 'deleted';
+  void _showSnackBar(String message, {bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Successfully $actionName ${selectedDocs.length} documents.'),
-        backgroundColor: action == 'delete' ? Colors.green : Colors.blue,
+        content: Text(message),
+        backgroundColor: isError ? Colors.red : Colors.green,
+        duration: const Duration(seconds: 3),
       ),
     );
   }
 
-  String _getInitials(String value) {
-    if (value.trim().isEmpty) return 'U';
-    final parts = value.trim().split(RegExp(r'\s+'));
-    if (parts.isEmpty || parts.first.isEmpty) return 'U';
-    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
-    return '${parts.first.substring(0, 1)}${parts.last.substring(0, 1)}'.toUpperCase();
-  }
-
-  void _showEditDialog(DashboardDocModel doc) {
-    TextEditingController titleCtrl = TextEditingController(text: doc.title);
-    TextEditingController docNumCtrl = TextEditingController(text: doc.docNumber);
-    bool isSubmitting = false;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          return AlertDialog(
-            title: const Text('Edit Document', style: TextStyle(fontWeight: FontWeight.bold)),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: titleCtrl,
-                  decoration: InputDecoration(
-                    labelText: 'Document Title',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: docNumCtrl,
-                  decoration: InputDecoration(
-                    labelText: 'Document Number',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel', style: TextStyle(color: Colors.black54)),
-              ),
-              ElevatedButton(
-                onPressed: isSubmitting
-                    ? null
-                    : () async {
-                        if (titleCtrl.text.trim().isEmpty || docNumCtrl.text.trim().isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Fields cannot be empty')));
-                          return;
-                        }
-                        
-                        setDialogState(() => isSubmitting = true);
-                        
-                        try {
-                          await ApiService().updateDocument(doc.id, {
-                            'title': titleCtrl.text.trim(),
-                            'doc_number': docNumCtrl.text.trim(), 
-                          });
-                          
-                          setState(() {
-                            doc.title = titleCtrl.text.trim();
-                            doc.docNumber = docNumCtrl.text.trim();
-                          });
-                          
-                          if (mounted) {
-                            Navigator.pop(ctx);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Document updated successfully!'), backgroundColor: Colors.green),
-                            );
-                          }
-                        } catch (e) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Update failed: ${e.toString().replaceAll("Exception: ", "")}'), backgroundColor: Colors.red),
-                          );
-                        } finally {
-                          if (mounted) setDialogState(() => isSubmitting = false);
-                        }
-                      },
-                style: ElevatedButton.styleFrom(backgroundColor: primaryBlue),
-                child: isSubmitting
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : const Text('Save Changes', style: TextStyle(color: Colors.white)),
-              ),
-            ],
-          );
-        },
-      ),
-    );
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    _docNumberCtrl.dispose();
+    _versionCtrl.dispose();
+    super.dispose();
   }
 
   @override
@@ -378,86 +356,31 @@ class _AdminUploadedDocumentScreenState extends State<AdminUploadedDocumentScree
       body: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const AdminSidebar(activeItem: "Uploaded Documents"),
+          const AdminSidebar(activeItem: "Upload Document"),
           Expanded(
             child: Column(
               children: [
-                AdminTopHeader(
-                  title: "Uploaded Documents",
-                  subtitle: "View and manage the documents you have uploaded.",
+                const AdminTopHeader(
+                  title: "Upload Document",
+                  subtitle:
+                      "Upload and organize documents to sync with ISL AI Assistant.",
                 ),
                 Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 32, right: 32, bottom: 32),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // --- Main Data Table (Left Side) ---
-                        Expanded(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: borderLight),
-                              boxShadow: [
-                                BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4)),
-                              ],
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                _buildToolbar(),
-                                const Divider(height: 1),
-                                _buildTableHeader(),
-                                const Divider(height: 1),
-                                Expanded(
-                                  child: _isLoading
-                                      ? const Center(child: CircularProgressIndicator())
-                                      : _errorMessage != null
-                                      ? Center(
-                                          child: Padding(
-                                            padding: const EdgeInsets.all(24),
-                                            child: Column(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                const Icon(Icons.error_outline, size: 42, color: Colors.red),
-                                                const SizedBox(height: 12),
-                                                Text(_errorMessage!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
-                                              ],
-                                            ),
-                                          ),
-                                        )
-                                      : _paginatedDocuments.isEmpty
-                                      ? Center(
-                                          child: Column(
-                                            mainAxisAlignment: MainAxisAlignment.center,
-                                            children: [
-                                              Icon(Icons.folder_open, size: 48, color: Colors.grey.shade300),
-                                              const SizedBox(height: 16),
-                                              const Text("No documents found.", style: TextStyle(color: Colors.grey, fontSize: 16)),
-                                            ],
-                                          ),
-                                        )
-                                      : ListView.separated(
-                                          itemCount: _paginatedDocuments.length,
-                                          separatorBuilder: (context, index) => const Divider(height: 1),
-                                          itemBuilder: (context, index) => _buildTableRow(_paginatedDocuments[index]),
-                                        ),
-                                ),
-                                const Divider(height: 1),
-                                _buildPaginationFooter(),
-                              ],
-                            ),
+                  child: _isFetchingData
+                      ? const Center(child: CircularProgressIndicator())
+                      : SingleChildScrollView(
+                          padding: const EdgeInsets.only(
+                            left: 32,
+                            right: 32,
+                            bottom: 32,
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(flex: 13, child: _buildFormContainer()),
+                            ],
                           ),
                         ),
-                        
-                        const SizedBox(width: 24), // Gap between table and side panel
-                        
-                        // --- Real-time Overview Panel (Right Side) ---
-                        _buildOverviewPanel(),
-                      ],
-                    ),
-                  ),
                 ),
               ],
             ),
@@ -467,558 +390,615 @@ class _AdminUploadedDocumentScreenState extends State<AdminUploadedDocumentScree
     );
   }
 
-  // --- New Widget: Right-Hand Side Summary Panel ---
-  Widget _buildOverviewPanel() {
-    return Container(
-      width: 280, // Fixed width like the images provided
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: borderLight),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Icon Box (Similar to design images)
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: Colors.blue.shade50,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(Icons.description_outlined, color: primaryBlue, size: 24),
+  Widget _buildFormContainer() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(28),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: borderLight),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.02),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
-          const SizedBox(height: 16),
-          
-          const Text(
-            "Uploads Overview",
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
-          ),
-          const SizedBox(height: 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Document Information",
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 24),
 
-          // Real-time API Data Rows
-          _buildOverviewRow("Total Uploaded", _totalUploads.toString(), Colors.blue.shade700),
-          Divider(color: Colors.grey.shade200, height: 32),
-          
-          _buildOverviewRow("Active Documents", _activeUploads.toString(), Colors.green.shade700),
-          Divider(color: Colors.grey.shade200, height: 32),
-          
-          _buildOverviewRow("Inactive Documents", _inactiveUploads.toString(), Colors.orange.shade700),
-          Divider(color: Colors.grey.shade200, height: 32),
-          
-          _buildOverviewRow("PDF Files", _pdfUploads.toString(), Colors.red.shade600),
+              _buildInputLabel("Document Title", isRequired: true),
+              _buildTextField(
+                controller: _titleCtrl,
+                hintText: "Enter document title",
+              ),
 
-          const SizedBox(height: 24),
-          const Text(
-            "By File Type",
-            style: TextStyle(fontSize: 13, color: Colors.grey, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 12),
-          _totalUploads == 0
-              ? const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Center(
-                    child: Text(
-                      'No documents yet',
-                      style: TextStyle(color: Colors.grey, fontSize: 12),
-                    ),
-                  ),
-                )
-              : SizedBox(
-                  height: 180,
-                  child: PieChart(
-                    PieChartData(
-                      sectionsSpace: 2,
-                      centerSpaceRadius: 40, // Donut-style hole in the middle
-                      sections: [
-                        if (_pdfCount > 0)
-                          PieChartSectionData(
-                            color: Colors.red.shade400,
-                            value: _pdfCount.toDouble(),
-                            title: 'PDF',
-                            radius: 35,
-                            titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
-                          ),
-                        if (_xlsCount > 0)
-                          PieChartSectionData(
-                            color: Colors.green.shade400,
-                            value: _xlsCount.toDouble(),
-                            title: 'XLS',
-                            radius: 35,
-                            titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
-                          ),
-                        if (_otherCount > 0)
-                          PieChartSectionData(
-                            color: Colors.blue.shade400,
-                            value: _otherCount.toDouble(),
-                            title: 'Other',
-                            radius: 35,
-                            titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
-                          ),
+              const SizedBox(height: 20),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildInputLabel("Department(s)", isRequired: true),
+                        _buildDepartmentMultiSelect(),
                       ],
                     ),
                   ),
+                  const SizedBox(width: 20),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            _buildInputLabel("Document Category (Tag)"),
+                            InkWell(
+                              onTap: _selectedDeptId == null ? null : _showAddCategoryDialog,
+                              borderRadius: BorderRadius.circular(4),
+                              child: Padding(
+                                padding: const EdgeInsets.only(bottom: 8.0),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.add_circle_outline,
+                                      size: 14,
+                                      color: _selectedDeptId == null ? Colors.grey.shade400 : primaryBlue,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      "New Category",
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: _selectedDeptId == null ? Colors.grey.shade400 : primaryBlue,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        _buildDropdownField(
+                          hintText: _selectedDeptId == null
+                              ? "Select a department first"
+                              : _isFetchingTags
+                                  ? "Loading categories..."
+                                  : _categoriesList.isEmpty
+                                      ? "No categories yet — add one above"
+                                      : "Select Category",
+                          value: _selectedCategoryId,
+                          // Dynamic Tags from API, scoped to the selected department
+                          items: _categoriesList.map<DropdownMenuItem<String>>((
+                            cat,
+                          ) {
+                            return DropdownMenuItem<String>(
+                              value: cat['id'].toString(),
+                              child: Text(
+                                cat['name'] ?? 'Unknown',
+                                style: const TextStyle(fontSize: 13),
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (val) =>
+                              setState(() => _selectedCategoryId = val),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 20),
+
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildInputLabel("File Type", isRequired: true),
+                        _buildDropdownField(
+                          hintText: "Select File Type",
+                          value: _selectedFileType,
+                          // Only strict choices matching the DB models
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'PDF',
+                              child: Text(
+                                "PDF (.pdf)",
+                                style: TextStyle(fontSize: 13),
+                              ),
+                            ),
+                            DropdownMenuItem(
+                              value: 'DOCX',
+                              child: Text(
+                                "Word (.docx)",
+                                style: TextStyle(fontSize: 13),
+                              ),
+                            ),
+                            DropdownMenuItem(
+                              value: 'XLSX',
+                              child: Text(
+                                "Excel (.xlsx)",
+                                style: TextStyle(fontSize: 13),
+                              ),
+                            ),
+                          ],
+                          onChanged: (val) =>
+                              setState(() => _selectedFileType = val),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 20),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildInputLabel("Version"),
+                        _buildTextField(
+                          controller: _versionCtrl,
+                          hintText: "e.g. v1.0, v2.1",
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          "Leave empty for auto versioning (1.0)",
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey.shade500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 20),
+
+              // REPLACED Description with Document Number to match Models.py
+              _buildInputLabel("Document Number", isRequired: true),
+              _buildTextField(
+                controller: _docNumberCtrl,
+                hintText: "e.g. SOP-001",
+              ),
+
+              const SizedBox(height: 24),
+
+              const Text(
+                "Status",
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                  color: Colors.black87,
                 ),
-        ],
-      ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  _buildStatusRadio(
+                    true,
+                    "Active",
+                    "Document is available for AI and users",
+                  ),
+                  const SizedBox(width: 30),
+                  _buildStatusRadio(
+                    false,
+                    "Inactive",
+                    "Document will be stored but not active",
+                  ),
+                ],
+              ),
 
-      
-    );
-    
-  }
+              const SizedBox(height: 32),
 
-  // --- Helper for Overview Rows ---
-  Widget _buildOverviewRow(String label, String value, Color valueColor) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: TextStyle(fontSize: 13, color: Colors.grey.shade600, fontWeight: FontWeight.w500),
+              const Text(
+                "File Upload",
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                  color: Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _buildDragDropArea(),
+            ],
+          ),
         ),
-        Text(
-          value,
-          style: TextStyle(fontSize: 16, color: valueColor, fontWeight: FontWeight.bold),
+
+        const SizedBox(height: 24),
+
+        // Action Buttons Row
+        Row(
+          children: [
+            ElevatedButton.icon(
+              onPressed: _isUploading ? null : _uploadDocument,
+              icon: _isUploading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : const Icon(
+                      Icons.cloud_upload_outlined,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+              label: Text(
+                _isUploading ? "Uploading..." : "Upload Document",
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0F47B2),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 18,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            OutlinedButton(
+              onPressed: () => Navigator.pop(context),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 18,
+                ),
+                side: BorderSide(color: borderLight),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                "Cancel",
+                style: TextStyle(color: Colors.black87, fontSize: 14),
+              ),
+            ),
+          ],
         ),
       ],
     );
   }
 
-  Widget _buildToolbar() {
+  Widget _buildInputLabel(String label, {bool isRequired = false}) {
     return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Row(
-        children: [
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.push(
-                context,
-                // Fix: Removed const
-                MaterialPageRoute(builder: (_) => AdminUploadDocumentScreen()),
-              ).then((_) => _fetchDocuments()); // Refetch if new upload
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: primaryBlue,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-            icon: const Icon(Icons.cloud_upload_outlined, color: Colors.white, size: 18),
-            label: const Text("Upload Document", style: TextStyle(color: Colors.white)),
+      padding: const EdgeInsets.only(bottom: 8.0),
+      child: RichText(
+        text: TextSpan(
+          text: label,
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 13,
+            color: Colors.black87,
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: TextField(
-              onChanged: (value) {
-                setState(() {
-                  _searchQuery = value.trim().toLowerCase();
-                  _applyFilters();
-                });
-              },
-              decoration: InputDecoration(
-                hintText: "Search your documents by title, keyword...",
-                hintStyle: TextStyle(color: Colors.grey.shade500, fontSize: 13),
-                prefixIcon: const Icon(Icons.search, color: Colors.grey),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: borderLight),
-                ),
-                contentPadding: const EdgeInsets.symmetric(vertical: 0),
-              ),
-            ),
-          ),
-          const SizedBox(width: 16),
-          Container(
-            decoration: BoxDecoration(
-              border: Border.all(color: borderLight),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: PopupMenuButton<String>(
-              offset: const Offset(0, 45),
-              onSelected: _handleBulkAction,
-              itemBuilder: (context) => [
-                const PopupMenuItem(value: 'activate', child: Text('Activate Selected')),
-                const PopupMenuItem(value: 'deactivate', child: Text('Deactivate Selected')),
-                const PopupMenuDivider(),
-                const PopupMenuItem(value: 'delete', child: Text('Delete Selected', style: TextStyle(color: Colors.red))),
-              ],
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                child: Row(
-                  children: const [
-                    Text("Bulk Actions", style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w500)),
-                    SizedBox(width: 8),
-                    Icon(Icons.keyboard_arrow_down, color: Colors.black87, size: 18),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTableHeader() {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Container(
-        width: 1200,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        color: Colors.grey.shade50,
-        child: Row(
-          children: [
-            Expanded(
-              flex: 1,
-              child: Checkbox(
-                value: isAllSelected,
-                onChanged: (v) {
-                  setState(() {
-                    isAllSelected = v ?? false;
-                    for (var doc in _paginatedDocuments) {
-                      doc.isSelected = isAllSelected;
-                    }
-                  });
-                },
-              ),
-            ),
-            Expanded(flex: 1, child: Text("File", style: _headerStyle())),
-            Expanded(
-              flex: 5,
-              child: Row(
-                children: [
-                  Text("Title", style: _headerStyle()),
-                  const Icon(Icons.unfold_more, size: 14, color: Colors.grey),
-                ],
-              ),
-            ),
-            Expanded(
-              flex: 3,
-              child: Row(
-                children: [
-                  Text("Department", style: _headerStyle()),
-                  const Icon(Icons.unfold_more, size: 14, color: Colors.grey),
-                ],
-              ),
-            ),
-            Expanded(flex: 1, child: Text("Type", style: _headerStyle())),
-            Expanded(flex: 1, child: Text("Version", style: _headerStyle())),
-            Expanded(flex: 2, child: Text("Status", style: _headerStyle())),
-            Expanded(
-              flex: 2,
-              child: Row(
-                children: [
-                  Text("Updated", style: _headerStyle()),
-                  const Icon(Icons.unfold_more, size: 14, color: Colors.grey),
-                ],
-              ),
-            ),
-            Expanded(flex: 3, child: Text("Uploaded By", style: _headerStyle())),
-            Expanded(flex: 4, child: Text("Actions", style: _headerStyle(), textAlign: TextAlign.center)),
-          ],
+          children: isRequired
+              ? [
+                  const TextSpan(
+                    text: ' *',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                ]
+              : [],
         ),
       ),
     );
   }
 
-  TextStyle _headerStyle() => const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87);
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String hintText,
+    int maxLines = 1,
+  }) {
+    return TextField(
+      controller: controller,
+      maxLines: maxLines,
+      decoration: InputDecoration(
+        hintText: hintText,
+        hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 16,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: Colors.grey.shade300),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: Colors.grey.shade300),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: primaryBlue, width: 1.5),
+        ),
+      ),
+    );
+  }
 
-  Widget _buildTableRow(DashboardDocModel doc) {
-    Color iconBgColor;
-    Color iconTextColor;
-    String displayType = doc.type.trim().toUpperCase();
-    String shortType;
-
-    if (displayType == 'PDF') {
-      iconBgColor = Colors.red.shade50;
-      iconTextColor = Colors.red;
-      shortType = 'PDF';
-    } else if (displayType.contains('XLS') || displayType.contains('EXCEL')) {
-      iconBgColor = Colors.green.shade50;
-      iconTextColor = Colors.green;
-      shortType = 'XLS';
-    } else {
-      iconBgColor = Colors.blue.shade50;
-      iconTextColor = Colors.blue;
-      shortType = displayType.isEmpty ? 'DOC' : displayType;
+  // --- MULTI-SELECT DEPARTMENT PICKER ---
+  // A document can now be linked to more than one department at once.
+  // Tapping a chip toggles it in/out of _selectedDeptIds, which is what
+  // actually gets sent to the backend on upload (see _uploadDocument).
+  Widget _buildDepartmentMultiSelect() {
+    if (_departmentsList.isEmpty) {
+      return Container(
+        height: 44,
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          _isFetchingData ? "Loading departments..." : "No departments available",
+          style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+        ),
+      );
     }
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Container(
-        width: 1200,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        color: doc.isSelected ? Colors.blue.shade50.withOpacity(0.3) : Colors.white,
-        child: Row(
-          children: [
-            Expanded(
-              flex: 1,
-              child: Checkbox(
-                value: doc.isSelected,
-                onChanged: (v) => setState(() {
-                  doc.isSelected = v ?? false;
-                  if (!doc.isSelected) isAllSelected = false;
-                }),
-              ),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: _departmentsList.map<Widget>((dept) {
+          final id = dept['id'].toString();
+          final name = dept['name'] ?? 'Unknown';
+          final isSelected = _selectedDeptIds.contains(id);
+          return FilterChip(
+            label: Text(name, style: const TextStyle(fontSize: 12)),
+            selected: isSelected,
+            onSelected: (_) => _toggleDepartment(id),
+            selectedColor: primaryBlue.withOpacity(0.15),
+            checkmarkColor: primaryBlue,
+            labelStyle: TextStyle(
+              color: isSelected ? primaryBlue : Colors.black87,
+              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
             ),
-            Expanded(
-              flex: 1,
-              child: Container(
-                width: 32,
-                height: 32,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(color: iconBgColor, borderRadius: BorderRadius.circular(6)),
-                child: Text(shortType, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: iconTextColor)),
-              ),
-            ),
-            Expanded(
-              flex: 5,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(doc.title.isNotEmpty ? doc.title : 'Untitled', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87), overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(4)),
-                    child: Text(doc.docNumber.isNotEmpty ? doc.docNumber : '-', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              flex: 3,
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(12)),
-                  child: Text(doc.department.isNotEmpty ? doc.department : 'General', style: TextStyle(fontSize: 11, color: Colors.blue.shade700, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
-                ),
-              ),
-            ),
-            Expanded(flex: 1, child: Text(doc.type.isNotEmpty ? doc.type : '-', style: const TextStyle(fontSize: 12, color: Colors.black87))),
-            Expanded(flex: 1, child: Text(doc.version.isNotEmpty ? doc.version : '1.0', style: const TextStyle(fontSize: 12, color: Colors.black87))),
-            Expanded(
-              flex: 2,
-              child: Row(
-                children: [
-                  Container(width: 8, height: 8, decoration: BoxDecoration(color: doc.isActive ? Colors.green : Colors.grey, shape: BoxShape.circle)),
-                  const SizedBox(width: 6),
-                  Text(doc.isActive ? "Active" : "Inactive", style: TextStyle(fontSize: 12, color: doc.isActive ? Colors.green.shade700 : Colors.grey.shade700, fontWeight: FontWeight.w600)),
-                ],
-              ),
-            ),
-            Expanded(
-              flex: 2,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(doc.updatedAt.isNotEmpty ? doc.updatedAt : '-', style: const TextStyle(fontSize: 12, color: Colors.black87), overflow: TextOverflow.ellipsis),
-                ],
-              ),
-            ),
-            Expanded(
-              flex: 3,
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 12,
-                    backgroundColor: primaryBlue,
-                    child: Text(doc.uploadedByInitials, style: const TextStyle(fontSize: 9, color: Colors.white)),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(doc.uploadedByName.isNotEmpty ? doc.uploadedByName : 'Unknown', style: const TextStyle(fontSize: 12, color: Colors.black87), overflow: TextOverflow.ellipsis),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              flex: 4,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _buildActionIcon(Icons.remove_red_eye_outlined),
-                  _buildActionIcon(Icons.download_outlined),
-                  
-                  GestureDetector(
-                    onTap: () => _showEditDialog(doc),
-                    child: Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(border: Border.all(color: borderLight), borderRadius: BorderRadius.circular(6)),
-                      child: const Icon(Icons.edit_outlined, size: 16, color: Colors.black87),
+            side: BorderSide(color: isSelected ? primaryBlue : Colors.grey.shade300),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  void _toggleDepartment(String deptId) {
+    setState(() {
+      if (_selectedDeptIds.contains(deptId)) {
+        _selectedDeptIds.remove(deptId);
+      } else {
+        _selectedDeptIds.add(deptId);
+      }
+    });
+
+    // Document Category (Tag) stays scoped to a single "primary"
+    // department — the first one picked — since tags themselves are
+    // still per-department on the backend. Re-fetch only when that
+    // primary department actually changes.
+    final newPrimary = _selectedDeptIds.isEmpty ? null : _selectedDeptIds.first;
+    if (newPrimary != _selectedDeptId) {
+      setState(() {
+        _selectedDeptId = newPrimary;
+        _selectedCategoryId = null;
+      });
+      if (newPrimary != null) {
+        _fetchTagsForDepartment(newPrimary);
+      } else {
+        setState(() => _categoriesList = []);
+      }
+    }
+  }
+
+  Widget _buildDropdownField({
+    required String hintText,
+    required String? value,
+    required List<DropdownMenuItem<String>> items,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: value,
+          isExpanded: true,
+          hint: Text(
+            hintText,
+            style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+          ),
+          icon: const Icon(Icons.keyboard_arrow_down, color: Colors.grey),
+          items: items.isEmpty
+              ? [
+                  DropdownMenuItem(
+                    value: null,
+                    child: Text(
+                      hintText,
+                      style: TextStyle(
+                        color: Colors.grey.shade400,
+                        fontSize: 13,
+                      ),
                     ),
                   ),
-
-                  GestureDetector(
-                    onTap: () {
-                      if (!_isAuthorizedToDelete(doc.department)) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Permission Denied: You can only delete files belonging to your department.'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                        return;
-                      }
-
-                      showDialog(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          title: const Text('Delete Document'),
-                          content: const Text('Are you sure you want to delete this document permanently?'),
-                          actions: [
-                            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-                            TextButton(
-                              onPressed: () async {
-                                Navigator.pop(ctx); 
-                                try {
-                                  await ApiService().deleteDocument(doc.id);
-                                  setState(() {
-                                    documentsList.removeWhere((d) => d.id == doc.id);
-                                    allMyDocuments.removeWhere((d) => d.id == doc.id);
-                                    if (_paginatedDocuments.isEmpty && _currentPage > 1) {
-                                      _currentPage--;
-                                    }
-                                    _calculateStats(); // Recalculate dynamically
-                                  });
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Document deleted.'), backgroundColor: Colors.green));
-                                  }
-                                } catch (e) {
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to delete: ${e.toString().replaceAll("Exception: ", "")}'), backgroundColor: Colors.red));
-                                  }
-                                }
-                              },
-                              child: const Text('Delete', style: TextStyle(color: Colors.red)),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(border: Border.all(color: borderLight), borderRadius: BorderRadius.circular(6)),
-                      child: const Icon(Icons.delete_outline, size: 16, color: Colors.red),
-                    ),
-                  ),
-
-                  Switch(
-                    value: doc.isActive,
-                    activeColor: Colors.green,
-                    onChanged: (val) async {
-                      final previous = doc.isActive;
-                      setState(() { 
-                        doc.isActive = val; 
-                        _calculateStats(); // Update stats locally instantly
-                      }); 
-                      try {
-                        await ApiService().toggleDocumentStatus(doc.id, val);
-                      } catch (e) {
-                        setState(() { 
-                          doc.isActive = previous; 
-                          _calculateStats(); // Revert stats if API fails
-                        }); 
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update status: $e'), backgroundColor: Colors.red));
-                      }
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ],
+                ]
+              : items,
+          onChanged: items.isEmpty ? null : onChanged,
         ),
       ),
     );
   }
 
-  Widget _buildActionIcon(IconData icon) {
-    return Container(
-      padding: const EdgeInsets.all(6),
-      decoration: BoxDecoration(border: Border.all(color: borderLight), borderRadius: BorderRadius.circular(6)),
-      child: Icon(icon, size: 16, color: Colors.black87),
-    );
-  }
-
-  Widget _buildPaginationFooter() {
-    final total = documentsList.length;
-    if (total == 0) return const SizedBox.shrink();
-
-    final startIndex = (_currentPage - 1) * _itemsPerPage + 1;
-    final endIndex = (startIndex + _itemsPerPage - 1) > total ? total : (startIndex + _itemsPerPage - 1);
-
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
+  Widget _buildStatusRadio(bool value, String title, String subtitle) {
+    return InkWell(
+      onTap: () => setState(() => _isActive = value),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("Showing $startIndex–$endIndex of $total documents", style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-          Row(
+          Radio<bool>(
+            value: value,
+            groupValue: _isActive,
+            activeColor: const Color(0xFF0F47B2),
+            onChanged: (val) => setState(() => _isActive = val!),
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              GestureDetector(
-                onTap: _currentPage > 1 ? () => setState(() => _currentPage--) : null,
-                child: _buildPageBox(Icons.chevron_left, isIcon: true, disabled: _currentPage == 1),
-              ),
-              for (int i = 1; i <= _totalPages; i++) 
-                GestureDetector(
-                  onTap: () => setState(() => _currentPage = i),
-                  child: _buildPageBox(i.toString(), isActive: _currentPage == i),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                  color: Colors.black87,
                 ),
-
-              GestureDetector(
-                onTap: _currentPage < _totalPages ? () => setState(() => _currentPage++) : null,
-                child: _buildPageBox(Icons.chevron_right, isIcon: true, disabled: _currentPage == _totalPages),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
               ),
             ],
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(border: Border.all(color: borderLight), borderRadius: BorderRadius.circular(6)),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<int>(
-                value: _itemsPerPage,
-                icon: const Icon(Icons.keyboard_arrow_down, size: 16),
-                isDense: true,
-                style: const TextStyle(fontSize: 12, color: Colors.black87),
-                items: [5, 10, 20, 50].map((int value) {
-                  return DropdownMenuItem<int>(value: value, child: Text("$value per page"));
-                }).toList(),
-                onChanged: (newValue) {
-                  if (newValue != null) {
-                    setState(() {
-                      _itemsPerPage = newValue;
-                      _currentPage = 1; 
-                    });
-                  }
-                },
-              ),
-            ),
-          ),
         ],
       ),
     );
   }
 
-  Widget _buildPageBox(dynamic content, {bool isActive = false, bool isIcon = false, bool disabled = false}) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 2),
-      width: 28, height: 28,
-      decoration: BoxDecoration(
-        color: isActive ? primaryBlue : (disabled ? Colors.grey.shade100 : Colors.white), 
-        border: Border.all(color: isActive ? primaryBlue : borderLight), 
-        borderRadius: BorderRadius.circular(4)
+  Widget _buildDragDropArea() {
+    return InkWell(
+      onTap: _pickFile,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 36),
+        decoration: BoxDecoration(
+          color: _pickedFile != null
+              ? Colors.green.shade50
+              : Colors.blue.shade50.withOpacity(0.3),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: _pickedFile != null
+                ? Colors.green.shade300
+                : Colors.blue.shade200,
+            width: 1.5,
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 10,
+                  ),
+                ],
+              ),
+              child: Icon(
+                _pickedFile != null
+                    ? Icons.check_circle
+                    : Icons.cloud_upload_outlined,
+                size: 28,
+                color: _pickedFile != null
+                    ? Colors.green
+                    : Colors.blue.shade600,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _pickedFile != null
+                  ? "File Ready: ${_pickedFile!.name}"
+                  : "Drag and drop your file here",
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: _pickedFile != null
+                    ? Colors.green.shade700
+                    : Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (_pickedFile == null) ...[
+              const Text(
+                "or",
+                style: TextStyle(color: Colors.grey, fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: _pickFile,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0F47B2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                ),
+                child: const Text(
+                  "Choose File",
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ],
+            if (_pickedFile != null) ...[
+              const SizedBox(height: 12),
+              TextButton.icon(
+                onPressed: _pickFile,
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text("Change File"),
+              ),
+            ],
+            const SizedBox(height: 20),
+            Text(
+              "Supported formats: PDF, DOCX, XLSX • Max file size: 50MB",
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+            ),
+          ],
+        ),
       ),
-      alignment: Alignment.center,
-      child: isIcon 
-          ? Icon(content as IconData, size: 16, color: disabled ? Colors.grey.shade400 : Colors.black87) 
-          : Text(content as String, style: TextStyle(color: isActive ? Colors.white : Colors.black87, fontSize: 12)),
     );
   }
 }

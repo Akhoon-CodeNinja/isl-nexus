@@ -177,6 +177,22 @@ class AlertSerializer(serializers.ModelSerializer):
             return False
         return obj.read_receipts.filter(user=request.user).exists()
 
+class LeaveApplicationSerializer(serializers.Serializer):
+    """Validates input from the chatbot's leave-application form. Not tied
+    to a model -- the actual record created on submit is an Alert (see
+    LeaveApplicationView in views.py), since a dedicated Leave model does
+    not exist in this schema."""
+
+    LEAVE_TYPE_CHOICES = (
+        ("SICK", "Sick Leave"),
+        ("CASUAL", "Casual Leave"),
+        ("ANNUAL", "Annual Leave"),
+    )
+
+    leave_type = serializers.ChoiceField(choices=LEAVE_TYPE_CHOICES)
+    reason = serializers.CharField(required=False, allow_blank=True, max_length=1000)
+
+
 class ChatSessionSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChatSession

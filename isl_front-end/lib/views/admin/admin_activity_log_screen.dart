@@ -51,7 +51,7 @@ class _AdminActivityLogScreenState extends State<AdminActivityLogScreen> {
 
   List<ActivityModel> activitiesList = [];
   bool _loading = true;
-  String? _error; // YEH THA ORANGE ERROR WALA VARIABLE
+  String? _error; // THIS WAS THE ERROR VARIABLE DISPLAYED IN ORANGE
   int _currentPage = 1;
   int _totalCount = 0;
   bool _hasNext = false;
@@ -90,7 +90,7 @@ class _AdminActivityLogScreenState extends State<AdminActivityLogScreen> {
     super.dispose();
   }
 
-  // --- API SE USERS + DISTINCT ACTIONS + DISTINCT MODULES FETCH KARNA ---
+  // --- FETCH USERS + DISTINCT ACTIONS + DISTINCT MODULES FROM API ---
   Future<void> _fetchDropdownData() async {
     // Users dropdown
     try {
@@ -222,7 +222,7 @@ class _AdminActivityLogScreenState extends State<AdminActivityLogScreen> {
               ),
       );
       
-      // Agar backend direct array bhej raha hai (results key ke baghair), toh usay handle karein
+      // Handle cases where the backend sends a direct array (without the 'results' key)
       List<dynamic> results = [];
       if (raw.containsKey('results') && raw['results'] is List) {
         results = raw['results'] as List<dynamic>;
@@ -234,7 +234,7 @@ class _AdminActivityLogScreenState extends State<AdminActivityLogScreen> {
         final i = entry.key;
         final json = entry.value as Map<String, dynamic>;
         
-        // Handle nested user_details ya direct user name
+        // Handle nested user_details or direct user name
         String userName = 'Unknown user';
         if (json['user_details'] is Map && json['user_details']['full_name'] != null) {
           userName = json['user_details']['full_name'].toString();
@@ -279,7 +279,7 @@ class _AdminActivityLogScreenState extends State<AdminActivityLogScreen> {
         activitiesList = items;
         _currentPage = targetPage;
         
-        // Agar count direct available hai
+        // If count is directly available
         if (raw.containsKey('count') && raw['count'] is int) {
            _totalCount = raw['count'] as int;
         } else {
@@ -297,7 +297,7 @@ class _AdminActivityLogScreenState extends State<AdminActivityLogScreen> {
       });
     } catch (e) {
       setState(() {
-        _error = e.toString().replaceAll("Exception: ", ""); // API error capture ho gaya
+        _error = e.toString().replaceAll("Exception: ", ""); // API error capture
         _loading = false;
       });
     }

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fl_chart/fl_chart.dart'; 
 
-// API Service lazmi import karein
+// Essential API Service import for backend communication
 import 'package:isl_app/core/services/api_service.dart';
 
 import 'package:isl_app/views/admin/admin_documents_screen.dart';
@@ -41,7 +41,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   int _totalActivities = 0, _docActivities = 0, _userActivities = 0, _systemActivities = 0;
   bool _isLoadingStats = true;
 
-  // Chart bars ke liye colors
+  // Color palette for the bar chart
   static const List<Color> _colorCycle = [
     Color(0xFF2563EB),
     Color(0xFFD97706),
@@ -71,14 +71,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
   }
 
-  // Parallel API requests run karne ke liye naya function
+  // Function to execute parallel API requests for optimized loading
   Future<void> _fetchDashboardData() async {
     setState(() {
       _loadingChart = true;
       _isLoadingStats = true;
     });
 
-    // Dono functions ek sath parallel chalenge taake fast load ho
+    // Execute both functions concurrently to minimize load time
     await Future.wait([
       _fetchChartData(),
       _fetchAllDashboardStats(),
@@ -92,7 +92,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
   }
 
-  // API se Real Stats (Cards ke liye)
+  // Fetch real-time stats from the API for the dashboard cards
   Future<void> _fetchAllDashboardStats() async {
     try {
       // 1. Documents Stats Fetching
@@ -123,7 +123,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       int tActivities = 0;
       List<dynamic> actResults = [];
       
-      // Kyunke activityRaw hamesha Map hota hai, hum direct keys check karenge
+      // Handle paginated responses by checking keys directly, as activityRaw is a Map
       if (activityRaw.containsKey('count')) {
         tActivities = int.tryParse(activityRaw['count'].toString()) ?? 0;
       }
@@ -171,7 +171,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
   }
 
-  // Yahan API se real data fetch ho raha hai Bar chart ke liye
+  // Fetch dynamic data from the API to populate the bar chart
   Future<void> _fetchChartData() async {
     try {
       final rawData = await _apiService.fetchDepartmentsRaw();

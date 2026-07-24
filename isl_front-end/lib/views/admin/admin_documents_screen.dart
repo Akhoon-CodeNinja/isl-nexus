@@ -670,7 +670,7 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                // --- CONDITION: SIRF PDF PAR VIEW KA BUTTON AAYEGA ---
+                // --- CONDITION: VIEW BUTTON WILL ONLY BE DISPLAYED FOR PDF FILES ---
                 if (displayType == 'PDF')
                   GestureDetector(
                     onTap: () async {
@@ -714,7 +714,7 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
                     child: _buildActionIcon(Icons.remove_red_eye_outlined),
                   ),
 
-                // --- DOWNLOAD BUTTON HAR FILE PAR AAYEGA ---
+                // --- DOWNLOAD BUTTON WILL BE DISPLAYED FOR ALL FILES ---
                 GestureDetector(
                   onTap: () async {
                     try {

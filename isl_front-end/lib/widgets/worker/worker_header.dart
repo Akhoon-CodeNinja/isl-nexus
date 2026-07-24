@@ -7,7 +7,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 // Fetches real user data from SharedPreferences.
 // ─────────────────────────────────────────────────────────────────────────────
 class WorkerHeader extends StatefulWidget {
-  const WorkerHeader({super.key});
+  const WorkerHeader({super.key, this.onMenuTap});
+
+  // NEW: optional callback for the hamburger icon. Screens that have a
+  // sidebar drawer (like Worker Chat) pass e.g. `Scaffold.of(context)
+  // .openDrawer` here; screens without a drawer can simply omit it and
+  // the icon stays inert, same as before.
+  final VoidCallback? onMenuTap;
 
   @override
   State<WorkerHeader> createState() => _WorkerHeaderState();
@@ -35,7 +41,7 @@ class _WorkerHeaderState extends State<WorkerHeader> {
       try {
         final userData = jsonDecode(userDataString) as Map<String, dynamic>;
         
-        // Agar backend response mein data 'user' key ke andar hai, toh usay nikal lein
+        // Extract the data from the 'user' key if the backend response is nested
         final userObj = userData['user'] is Map<String, dynamic> ? userData['user'] : userData;
 
         if (mounted) {
@@ -80,6 +86,16 @@ class _WorkerHeaderState extends State<WorkerHeader> {
         .toUpperCase();
   }
 
+  // Safe no-op if the nearest Scaffold has no `drawer` set, so screens
+  // without a sidebar (e.g. plain content pages) aren't forced to add one
+  // just to use WorkerHeader.
+  void _openNearestDrawer(BuildContext context) {
+    final scaffold = Scaffold.maybeOf(context);
+    if (scaffold != null && scaffold.hasDrawer) {
+      scaffold.openDrawer();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -89,7 +105,17 @@ class _WorkerHeaderState extends State<WorkerHeader> {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           // ── Hamburger ──────────────────────────────────────────────────
-          const Icon(Icons.menu, color: Colors.white, size: 24),
+          // If a screen passes `onMenuTap` explicitly, that wins (e.g. it
+          // might do something other than open a drawer). Otherwise, fall
+          // back to opening whatever Drawer is set on the nearest Scaffold
+          // -- so any screen that puts `drawer: WorkerChatDrawer(...)` on
+          // its Scaffold gets a working hamburger for free, without having
+          // to also remember to wire onMenuTap by hand.
+          GestureDetector(
+            onTap: widget.onMenuTap ?? () => _openNearestDrawer(context),
+            behavior: HitTestBehavior.opaque,
+            child: const Icon(Icons.menu, color: Colors.white, size: 24),
+          ),
           const SizedBox(width: 12),
 
           // ── Avatar + online dot ────────────────────────────────────────

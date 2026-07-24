@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:isl_app/widgets/worker/worker_header.dart';
 import 'package:isl_app/widgets/worker/worker_bottom_nav.dart';
+import 'package:isl_app/widgets/worker/worker_shared_drawer.dart';
 import 'package:isl_app/views/worker/worker_chat_screen.dart';
 import 'package:isl_app/views/worker/worker_documents_screen.dart';
 import 'package:isl_app/views/worker/worker_profile_screen.dart';
@@ -191,6 +192,7 @@ class _WorkerAlertsScreenState extends State<WorkerAlertsScreen> {
 
     return Scaffold(
       backgroundColor: Colors.white,
+      drawer: buildSharedWorkerDrawer(context),
       body: SafeArea(
         bottom: false,
         child: Column(

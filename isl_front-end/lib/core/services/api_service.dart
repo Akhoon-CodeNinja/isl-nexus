@@ -13,6 +13,20 @@ class ApiService {
   final http.Client _client;
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
+  // NEW: signals that the chat screen should start a BRAND NEW chat
+  // session next time it loads, instead of resuming the last one.
+  // - Defaults to `true`, so the very first chat-screen load after the
+  //   app process starts (cold launch) gets a fresh chat.
+  // - Set back to `true` inside saveSession() below, which runs on every
+  //   successful login/register/OTP/Microsoft sign-in -- so signing out
+  //   and signing back in (even without restarting the app) also starts
+  //   a fresh chat, instead of silently resuming the previous one.
+  // - The chat screen sets this back to `false` once it has actually
+  //   started the new session, so normal navigation within the app
+  //   (switching tabs, going to Documents and back, etc.) keeps resuming
+  //   the same ongoing conversation as before.
+  static bool needsFreshChatSession = true;
+
   static const String baseUrl = kIsWeb ? 'http://127.0.0.1:8000' : 'http://10.0.2.2:8000';
   
   static const String authLogin = '/api/auth/login/';
@@ -26,6 +40,13 @@ class ApiService {
   static const String departments = '/api/departments/';
   static const String users = '/api/users/';
   static const String chatAsk = '/api/chat/ask/';
+  static const String chatHistory = '/api/chat/history/';
+  // NEW: "New Chat" button + sidebar "Recent" list support.
+  // NOTE: make sure these two paths are registered in your Django urls.py,
+  // pointing at ChatNewSessionView and ChatSessionListView respectively.
+  static const String chatNewSession = '/api/chat/session/new/';
+  static const String chatSessions = '/api/chat/sessions/';
+  static const String leaveApply = '/api/leave/apply/';
   static const String alerts = '/api/alerts/';
   static const String quickHelp = '/api/help/';
   static const String auditLogs = '/api/audit-logs/'; 
@@ -35,7 +56,7 @@ class ApiService {
   String? _memoryToken;
 
   Future<String?> _readToken() async {
-    // Agar RAM mein token hai toh fauran return karein (No await delay)
+    // If token is in RAM, return immediately (No await delay)
     if (_memoryToken != null && _memoryToken!.isNotEmpty) return _memoryToken;
     
     final prefs = await SharedPreferences.getInstance();
@@ -58,10 +79,14 @@ class ApiService {
   }
 
   Future<void> saveSession(AuthSession session) async {
-    _memoryToken = session.token; // Fauran RAM mein update karein
+    _memoryToken = session.token; // Update immediately in RAM
+    // A real sign-in just happened -- make sure the next chat screen load
+    // starts a brand new chat instead of resuming whatever was last shown
+    // (which may belong to this same run's previous logged-in session).
+    needsFreshChatSession = true;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('access_token', session.token);
-    await prefs.setString('refresh_token', session.refreshToken); // Refresh token bhi save karein
+    await prefs.setString('refresh_token', session.refreshToken); // Also save Refresh token
     await prefs.setString('role', session.role);
     await prefs.setString('user_id', session.userId);
     await prefs.setString('email', session.email);
@@ -112,10 +137,84 @@ class ApiService {
     }).toList();
 
     return {
-      'answer': (data['answer'] ?? data['response'] ?? 'Jawab nahi mila').toString(),
+      'answer': (data['answer'] ?? data['response'] ?? 'No answer found.').toString(),
       'references': references,
       'required_docs': data['required_docs'] ?? [],
+      // Backend now also returns these two: 'intent' tells us if the bot
+      // detected a leave request (LEAVE_REQUEST) or the daily quota was
+      // hit (LIMIT_REACHED); 'remaining_messages_today' drives the
+      // input-bar disable state.
+      'intent': data['intent']?.toString(),
+      'remaining_messages_today': data['remaining_messages_today'],
     };
+  }
+
+  /// GET /api/chat/history/ -- always scoped to the signed-in user's own
+  /// token, so it can never return another user's chat history.
+  /// [limit] lets the dedicated Chat History page pull more than the
+  /// default window shown on the live chat screen.
+  /// [sessionId] lets the sidebar's "Recent" list reopen one specific past
+  /// session (read-only) instead of always the latest/active one.
+  Future<Map<String, dynamic>> fetchChatHistory({int? limit, String? sessionId}) async {
+    final response = await _get(
+      chatHistory,
+      query: {
+        if (limit != null) 'limit': limit.toString(),
+        if (sessionId != null) 'session_id': sessionId,
+      },
+    );
+    final data = response['data'] as Map<String, dynamic>? ?? {};
+    final rawMessages = data['messages'] as List<dynamic>? ?? [];
+    return {
+      'session_id': data['session_id'],
+      'daily_limit': data['daily_limit'],
+      'remaining_messages_today': data['remaining_messages_today'],
+      'messages': rawMessages
+          .map((m) => Map<String, dynamic>.from(m as Map))
+          .toList(),
+    };
+  }
+
+  /// POST /api/chat/session/new/ -- starts a brand new chat session for
+  /// the "New Chat" button (and once automatically on a fresh app launch).
+  /// The old session/messages are kept, just no longer "active".
+  Future<Map<String, dynamic>> startNewChatSession() async {
+    final response = await _post(chatNewSession, body: {});
+    return response['data'] as Map<String, dynamic>? ?? {};
+  }
+
+  /// GET /api/chat/sessions/ -- the signed-in user's own past chats
+  /// (most recent first), each with a short preview line. Powers the
+  /// "Recent" section of the chat sidebar.
+  Future<List<Map<String, dynamic>>> fetchChatSessions() async {
+    final response = await _get(chatSessions);
+    final data = response['data'] as Map<String, dynamic>? ?? {};
+    final raw = data['sessions'] as List<dynamic>? ?? [];
+    return raw.map((s) => Map<String, dynamic>.from(s as Map)).toList();
+  }
+
+  /// DELETE /api/chat/sessions/:id/ -- deletes a specific past chat session
+  Future<void> deleteChatSession(String sessionId) async {
+    await _delete('$chatSessions$sessionId/');
+  }
+
+  /// DELETE /api/chat/sessions/ -- clears all chat history for this user
+  Future<void> deleteAllChatSessions() async {
+    await _delete(chatSessions); 
+  }
+
+  /// POST /api/leave/apply/ -- submits a leave application, which the
+  /// backend routes to the worker's Department Head via the Alert system.
+  /// [leaveType] must be one of 'SICK', 'CASUAL', 'ANNUAL'.
+  Future<Map<String, dynamic>> submitLeaveApplication({
+    required String leaveType,
+    String reason = '',
+  }) async {
+    final response = await _post(
+      leaveApply,
+      body: {'leave_type': leaveType, 'reason': reason},
+    );
+    return response['data'] as Map<String, dynamic>? ?? {};
   }
 
   Future<AuthSession> login({
@@ -294,7 +393,7 @@ class ApiService {
   }
 
   Future<List<Map<String, dynamic>>> fetchDepartmentsRaw() async {
-    // BUG FIX: Pehle yeh auth: false tha jo 401 error de raha tha.
+    // BUG FIX: Previously this was auth: false which caused a 401 error.
     final response = await _get(departments, auth: true); 
     return _asList(response['data']);
   }
@@ -382,6 +481,26 @@ class ApiService {
     await _patch(alerts, body: {'mark_all_read': true});
   }
 
+  // NEW: Admin panel se alerts/notifications bhejne ke liye
+  Future<void> sendNotification({
+    required String title,
+    required String description,
+    required String type,
+    String? targetDepartmentId, // null means 'All Departments'
+  }) async {
+    final payload = <String, dynamic>{
+      'title': title,
+      'description': description,
+      'type': type,
+    };
+
+    if (targetDepartmentId != null && targetDepartmentId.isNotEmpty) {
+      payload['target_department'] = targetDepartmentId;
+    }
+
+    await _post(alerts, body: payload);
+  }
+
   Future<List<QuickHelpItem>> fetchQuickHelp() async {
     final response = await _get(quickHelp);
     final items = response['data'] as List<dynamic>? ?? [];
@@ -454,7 +573,7 @@ class ApiService {
     Map<String, dynamic>? body,
     Map<String, String>? query,
     bool auth = true,
-    bool isRetry = false, // Infinite loops se bachne ke liye
+    bool isRetry = false, // To avoid infinite loops
   }) async {
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
     final headers = await _headers(auth: auth);
@@ -499,16 +618,16 @@ class ApiService {
       return {'data': decoded};
     }
 
-    // INTERCEPTOR: Agar 401 aaya, toh chupke se Refresh Token bhejo
+    // INTERCEPTOR: If 401 occurs, silently send Refresh Token
     if (response.statusCode == 401) {
       if (!isRetry && auth) {
         final refreshed = await _attemptTokenRefresh();
         if (refreshed) {
-          // Token refresh ho gaya! Original API call ko dobara hit karo
+          // Token refreshed! Retry the original API call
           return _request(method, path, body: body, query: query, auth: auth, isRetry: true);
         }
       }
-      // Agar refresh bhi fail ho jaye, toh User ko logout karo
+      // If refresh also fails, log out the user
       await clearSession();
       throw Exception('Session expired. Please sign in again.');
     }
@@ -516,7 +635,7 @@ class ApiService {
     throw Exception(_extractErrorMessage(response));
   }
 
-  // Naya Method: Background mein token refresh karne ke liye
+  // New Method: To refresh token in the background
   Future<bool> _attemptTokenRefresh() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -534,8 +653,8 @@ class ApiService {
         final data = jsonDecode(response.body);
         final newAccess = data['access'] ?? data['token'];
         if (newAccess != null) {
-          _memoryToken = newAccess; // RAM cache update
-          await prefs.setString('access_token', newAccess); // Disk update
+          _memoryToken = newAccess; // Update RAM cache
+          await prefs.setString('access_token', newAccess); // Update Disk storage
           return true;
         }
       }

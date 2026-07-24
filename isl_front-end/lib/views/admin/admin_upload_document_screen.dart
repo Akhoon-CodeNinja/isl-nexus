@@ -25,7 +25,7 @@ class _AdminUploadDocumentScreenState extends State<AdminUploadDocumentScreen> {
   // Form Controllers
   final TextEditingController _titleCtrl = TextEditingController();
   final TextEditingController _docNumberCtrl =
-      TextEditingController(); // Description ki jagah Document Number
+      TextEditingController(); // Replacing Description with Document Number
   final TextEditingController _versionCtrl = TextEditingController();
 
   // Backend Data Lists
@@ -41,7 +41,7 @@ class _AdminUploadDocumentScreenState extends State<AdminUploadDocumentScreen> {
   final Set<String> _selectedDeptIds = {};
   String? _selectedDeptId;
   String? _selectedCategoryId;
-  String? _selectedFileType; // 'PDF' ya 'DOCX'
+  String? _selectedFileType; // 'PDF' or 'DOCX'
 
   bool _isActive = true;
   PlatformFile? _pickedFile;

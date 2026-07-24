@@ -4,13 +4,14 @@ import 'package:isl_app/core/providers/app_state.dart';
 import 'package:isl_app/views/admin/admin_documents_screen.dart';
 import 'package:isl_app/views/admin/admin_departments_screen.dart';
 import 'package:isl_app/views/admin/admin_upload_document_screen.dart';
-// Naya import:
 import 'package:isl_app/views/admin/admin_uploaded_document_screen.dart';
 import 'package:isl_app/views/admin/admin_activity_log_screen.dart';
 import 'package:isl_app/views/admin/admin_users_screen.dart';
 import 'package:isl_app/views/admin/admin_dashboard_screen.dart';
 import 'package:isl_app/views/admin/admin_settings_screen.dart';
 import 'package:isl_app/views/auth/login_screen.dart';
+// Nayi Notification screen ka import add kiya gaya hai
+import 'package:isl_app/views/admin/admin_send_notification_screen.dart';
 
 class AdminSidebar extends StatelessWidget {
   final String activeItem;
@@ -26,8 +27,10 @@ class AdminSidebar extends StatelessWidget {
     );
   }
 
-  void _signOut(BuildContext context) {
-    context.read<AppState>().logout();
+  Future<void> _signOut(BuildContext context) async {
+    await context.read<AppState>().logout();
+    if (!context.mounted) return;
+    
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -106,17 +109,15 @@ class AdminSidebar extends StatelessWidget {
             isActive: activeItem == "Upload Document",
             onTap: activeItem == "Upload Document"
                 ? null
-                : () => _navigateTo(context, AdminUploadDocumentScreen()),
+                : () => _navigateTo(context, AdminUploadDocumentScreen()), 
           ),
-          // Yahan humne naya "Uploaded Documents" ka tab daal diya hai
           _NavItem(
             icon: Icons.file_present_rounded,
             title: "My Uploads",
             isActive: activeItem == "Uploaded Documents",
             onTap: activeItem == "Uploaded Documents"
                 ? null
-                : () =>
-                      _navigateTo(context, const AdminUploadedDocumentScreen()),
+                : () => _navigateTo(context, AdminUploadedDocumentScreen()), 
           ),
           _NavItem(
             icon: Icons.history,
@@ -126,6 +127,17 @@ class AdminSidebar extends StatelessWidget {
                 ? null
                 : () => _navigateTo(context, const AdminActivityLogScreen()),
           ),
+          
+          // ── Naya Notifications Button ──
+          _NavItem(
+            icon: Icons.notifications_active_outlined,
+            title: "Notifications",
+            isActive: activeItem == "Notifications",
+            onTap: activeItem == "Notifications"
+                ? null
+                : () => _navigateTo(context, const AdminSendNotificationScreen()),
+          ),
+
           _NavItem(
             icon: Icons.people_outline,
             title: "Users",
@@ -170,6 +182,7 @@ class AdminSidebar extends StatelessWidget {
 
 class _NavItem extends StatelessWidget {
   const _NavItem({
+    super.key,
     required this.icon,
     required this.title,
     required this.isActive,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:isl_app/widgets/worker/worker_header.dart';
 import 'package:isl_app/widgets/worker/worker_bottom_nav.dart';
+import 'package:isl_app/widgets/worker/worker_shared_drawer.dart';
 import 'package:isl_app/views/worker/worker_chat_screen.dart';
 import 'package:isl_app/views/worker/worker_documents_screen.dart';
 import 'package:isl_app/views/worker/worker_alerts_screen.dart';
@@ -74,7 +75,13 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
   }
 
   // ── Logout ────────────────────────────────────────────────────────────────
-  void _logout(BuildContext context) {
+  void _logout(BuildContext context) async {
+    // NOTE: this previously only navigated to LoginScreen without clearing
+    // the stored session -- fixed to match WorkerChatScreen's logout, so
+    // stale tokens/user_data don't linger in SharedPreferences and the
+    // next login is guaranteed to start a fresh chat session.
+    await _api.clearSession();
+    if (!context.mounted) return;
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -115,6 +122,7 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
+      drawer: buildSharedWorkerDrawer(context),
       body: SafeArea(
         bottom: false,
         child: Column(

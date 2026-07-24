@@ -21,7 +21,8 @@ from .models import Department, Document, Tag, Alert, ChatSession, ChatMessage, 
 from .serializers import (
     CustomTokenObtainPairSerializer, DepartmentSerializer, DocumentSerializer, 
     TagSerializer, AlertSerializer, ChatSessionSerializer, ChatMessageSerializer,
-    UserListSerializer, MeSerializer, AuditLogSerializer, SystemSettingsSerializer
+    UserListSerializer, MeSerializer, AuditLogSerializer, SystemSettingsSerializer,
+    LeaveApplicationSerializer
 )
 from .permissions import IsDepartmentHeadOrReadOnly
 
@@ -65,35 +66,276 @@ def sync_vector_store():
         # nahi honi chahiye -- sirf log karein.
         print(f"[sync_vector_store] Warning: FAISS index rebuild failed: {e}")
 
+DAILY_MESSAGE_LIMIT = 30  # shared constant so ChatAskView and ChatHistoryView never disagree
+
+
+def get_remaining_messages_today(user) -> int:
+    """How many more messages `user` can send today, per the daily quota."""
+    today = timezone.localdate()
+    sent_today = ChatMessage.objects.filter(
+        session__user=user,
+        sender=ChatMessage.Sender.USER,
+        created_at__date=today,
+    ).count()
+    return max(0, DAILY_MESSAGE_LIMIT - sent_today)
+
+
 class ChatAskView(APIView):
     permission_classes = [permissions.IsAuthenticated] # Sirf logged-in ISL users ke liye
 
+    # Point 3 (chat limitation): daily message quota per user, and how many
+    # recent messages the frontend keeps visible in one session (older
+    # messages stay in the DB, just not returned in bulk on every load).
+    DAILY_MESSAGE_LIMIT = DAILY_MESSAGE_LIMIT
+    SESSION_HISTORY_WINDOW = 50
+
+    def _get_or_create_session(self, user):
+        """One ongoing ChatSession per user -- reused across app opens, so
+        history keeps accumulating for that user (point 4) without ever
+        touching another user's rows (point 2), since every lookup here is
+        scoped to `user=request.user`.
+        """
+        session = ChatSession.objects.filter(user=user).order_by('-started_at').first()
+        if session is None:
+            session = ChatSession.objects.create(user=user)
+        return session
+
     def post(self, request):
-        # Frontend se 'query' ya 'message' jo bhi aaye usay utha lein
+        user = request.user
         query = request.data.get('query') or request.data.get('message', '')
         query = query.strip() if query else ''
 
         if not query:
             return Response({
-                "answer": "Sawal khali hai, baraye meharbani sawal likhein.", 
+                "answer": "Sawal khali hai, baraye meharbani sawal likhein.",
                 "references": []
             })
 
+        session = self._get_or_create_session(user)
+
+        today = timezone.localdate()
+        messages_sent_today = ChatMessage.objects.filter(
+            session__user=user,
+            sender=ChatMessage.Sender.USER,
+            created_at__date=today,
+        ).count()
+
+        if messages_sent_today >= self.DAILY_MESSAGE_LIMIT:
+            return Response({
+                "answer": (
+                    "Aaj ke liye aapki message limit "
+                    f"({self.DAILY_MESSAGE_LIMIT} messages) mukammal ho chuki hai. "
+                    "Baraye meharbani kal dobara koshish karein."
+                ),
+                "intent": "LIMIT_REACHED",
+                "references": [],
+                "remaining_messages_today": 0,
+            })
+
+        # User ka message pehle save karein, taake process_query fail bhi ho
+        # to bhi history mein rahe.
+        ChatMessage.objects.create(
+            session=session, sender=ChatMessage.Sender.USER, message_text=query,
+        )
+
         try:
-            # Ab sara AI logic (Semantic Routing + RAG) services.py handle karega
-            reply = chatbot_service.process_query(query)
-            
+            result = chatbot_service.process_query(query)
+            reply = result["answer"]
+            intent = result["intent"]
+
+            ChatMessage.objects.create(
+                session=session, sender=ChatMessage.Sender.AI, message_text=reply,
+            )
+
+            remaining = max(0, self.DAILY_MESSAGE_LIMIT - (messages_sent_today + 1))
+
             return Response({
                 "answer": reply,
-                "references": [], 
-                "success": True
+                "intent": intent,
+                "references": [],
+                "success": True,
+                "remaining_messages_today": remaining,
             })
 
         except Exception as e:
+            error_reply = f"System mein koi masla aaya hai: {str(e)}"
+            ChatMessage.objects.create(
+                session=session, sender=ChatMessage.Sender.AI, message_text=error_reply,
+            )
             return Response({
-                "answer": f"System mein koi masla aaya hai: {str(e)}", 
+                "answer": error_reply,
                 "references": []
             }, status=500)
+
+
+class ChatNewSessionView(APIView):
+    """POST /api/chat/session/new/ -- explicitly starts a brand new chat
+    session for the logged-in user (used by the "New Chat" button in the
+    sidebar, and automatically once when the app is freshly opened).
+
+    The old session and its messages are NOT deleted -- they stay exactly
+    as they are and remain visible in the "Recent" sidebar list / Chat
+    History screen. They simply stop being the "active" session, because
+    ChatAskView/ChatHistoryView always pick the most-recently-started
+    session for that user (order_by('-started_at')).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        session = ChatSession.objects.create(user=request.user)
+        return Response({
+            "session_id": str(session.id),
+            "daily_limit": DAILY_MESSAGE_LIMIT,
+            "remaining_messages_today": get_remaining_messages_today(request.user),
+        }, status=http_status.HTTP_201_CREATED)
+
+
+class ChatSessionListView(APIView):
+    """GET /api/chat/sessions/ -- lightweight list of the logged-in user's
+    OWN past chat sessions (most recent first), each with a short preview
+    of its first message. Powers the "Recent" section of the chat sidebar.
+
+    Scoped strictly to request.user (same guarantee as ChatHistoryView) --
+    a user can never see another user's sessions here.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        sessions = ChatSession.objects.filter(user=request.user).order_by('-started_at')
+        data = []
+        for s in sessions:
+            first_msg = s.messages.order_by('created_at').first()
+            last_msg = s.messages.order_by('-created_at').first()
+            if first_msg is None:
+                # Empty session (e.g. user tapped "New Chat" but never sent
+                # a message) -- skip it from the list so it doesn't clutter
+                # the sidebar with blank entries.
+                continue
+            data.append({
+                "session_id": str(s.id),
+                "preview": first_msg.message_text[:80],
+                "started_at": s.started_at.isoformat(),
+                "last_message_at": (last_msg.created_at if last_msg else s.started_at).isoformat(),
+                "message_count": s.messages.count(),
+            })
+        return Response({"sessions": data})
+
+
+class ChatHistoryView(APIView):
+    """GET /api/chat/history/ -- returns only the current user's own chat
+    history (last SESSION_HISTORY_WINDOW messages of their session), never
+    another user's. Used by the Flutter app on chat screen load so history
+    is per-account instead of living in throwaway widget state.
+
+    Optional ?session_id=<uuid> lets the sidebar's "Recent" list reopen a
+    specific past session (read-only) instead of always the latest one --
+    still filtered by user=user so a user can never fetch someone else's
+    session by guessing an id.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        session_id = request.query_params.get('session_id')
+        if session_id:
+            session = ChatSession.objects.filter(user=user, id=session_id).first()
+        else:
+            session = ChatSession.objects.filter(user=user).order_by('-started_at').first()
+        if session is None:
+            return Response({
+                "messages": [],
+                "session_id": None,
+                "daily_limit": DAILY_MESSAGE_LIMIT,
+                "remaining_messages_today": DAILY_MESSAGE_LIMIT,
+            })
+
+        # Default window keeps the live chat screen light; the dedicated
+        # Chat History page passes a larger ?limit= to pull everything.
+        try:
+            limit = int(request.query_params.get('limit', ChatAskView.SESSION_HISTORY_WINDOW))
+        except (TypeError, ValueError):
+            limit = ChatAskView.SESSION_HISTORY_WINDOW
+        limit = max(1, min(limit, 1000))  # sane upper bound regardless of what's requested
+
+        messages = list(
+            session.messages.order_by('-created_at')[:limit]
+        )
+        messages.reverse()  # chronological order for display
+
+        return Response({
+            "session_id": str(session.id),
+            "daily_limit": DAILY_MESSAGE_LIMIT,
+            "remaining_messages_today": get_remaining_messages_today(user),
+            "messages": [
+                {
+                    "id": str(m.id),
+                    "sender": m.sender,
+                    "text": m.message_text,
+                    "created_at": m.created_at.isoformat(),
+                }
+                for m in messages
+            ],
+        })
+
+
+class LeaveApplicationView(APIView):
+    """POST /api/leave/apply/ -- lets any authenticated worker submit a
+    leave application. Per product decision, there's no dedicated Leave
+    model; it's routed through the existing Alert system directly to the
+    worker's own Department Head (bypassing AlertViewSet's
+    IsDepartmentHeadOrReadOnly, since a worker must be able to create this
+    specific kind of alert about themselves).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    LEAVE_TYPE_LABELS = dict(LeaveApplicationSerializer.LEAVE_TYPE_CHOICES)
+
+    def post(self, request):
+        user = request.user
+        serializer = LeaveApplicationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        leave_type = serializer.validated_data['leave_type']
+        reason = serializer.validated_data.get('reason', '').strip()
+        leave_type_label = self.LEAVE_TYPE_LABELS.get(leave_type, leave_type)
+
+        if not reason:
+            reason = (
+                f"{user.full_name} {leave_type_label.lower()} ke liye darkhwast "
+                "kar rahe/rahi hain. Baraye meharbani manzoori dein."
+            )
+
+        application_text = (
+            f"Application Text:\n\n"
+            f"Respected Sir/Madam,\n\n"
+            f"Mera naam {user.full_name} hai (Employee ID: {user.employee_id}). "
+            f"Main {leave_type_label} ke liye darkhwast kar raha/rahi hoon.\n\n"
+            f"Wajah: {reason}\n\n"
+            f"Baraye meharbani meri darkhwast manzoor karein.\n\n"
+            f"Shukriya,\n{user.full_name}"
+        )
+
+        alert = Alert.objects.create(
+            title=f"Leave Application - {user.full_name} ({leave_type_label})",
+            description=application_text,
+            type=Alert.AlertType.LEAVE_REQUEST,
+            target_department=user.department,
+            created_by=user,
+        )
+
+        AuditLog.objects.create(
+            user=user,
+            action="Submitted Leave Application",
+            entity_type="Alert",
+            entity_id=alert.id,
+            ip_address=get_client_ip(request),
+        )
+
+        return Response({
+            "success": True,
+            "alert_id": str(alert.id),
+            "application_text": application_text,
+        }, status=http_status.HTTP_201_CREATED)
 
 
 User = get_user_model()
@@ -677,15 +919,46 @@ class AlertViewSet(viewsets.ModelViewSet):
             return Response({"status": "Success", "message": "Alert marked as read."})
         return Response({"status": "Ignored", "message": "Alert was already marked as read."})
 
-class ChatSessionViewSet(viewsets.ModelViewSet):
-    serializer_class = ChatSessionSerializer
+class ChatSessionListView(APIView):
+    """GET /api/chat/sessions/ -- lightweight list of the logged-in user's
+    OWN past chat sessions...
+    """
     permission_classes = [permissions.IsAuthenticated]
 
-    def get_queryset(self):
-        return ChatSession.objects.filter(user=self.request.user)
+    def get(self, request):
+        sessions = ChatSession.objects.filter(user=request.user).order_by('-started_at')
+        data = []
+        for s in sessions:
+            first_msg = s.messages.order_by('created_at').first()
+            last_msg = s.messages.order_by('-created_at').first()
+            if first_msg is None:
+                continue
+            data.append({
+                "session_id": str(s.id),
+                "preview": first_msg.message_text[:80],
+                "started_at": s.started_at.isoformat(),
+                "last_message_at": (last_msg.created_at if last_msg else s.started_at).isoformat(),
+                "message_count": s.messages.count(),
+            })
+        return Response({"sessions": data})
 
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+    # NEW: Clear All Chats ke liye
+    def delete(self, request):
+        ChatSession.objects.filter(user=request.user).delete()
+        return Response(status=http_status.HTTP_204_NO_CONTENT)
+
+
+# NEW: Single Chat Delete karne ke liye
+class ChatSessionDetailView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def delete(self, request, session_id):
+        try:
+            session = ChatSession.objects.get(id=session_id, user=request.user)
+            session.delete()
+            return Response(status=http_status.HTTP_204_NO_CONTENT)
+        except ChatSession.DoesNotExist:
+            return Response({"error": "Chat not found"}, status=http_status.HTTP_404_NOT_FOUND)
 
 class ChatMessageViewSet(viewsets.ModelViewSet):
     serializer_class = ChatMessageSerializer
