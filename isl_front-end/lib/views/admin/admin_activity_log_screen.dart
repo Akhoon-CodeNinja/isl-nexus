@@ -337,7 +337,7 @@ class _AdminActivityLogScreenState extends State<AdminActivityLogScreen> {
                   // the small overflow markers in the screenshot.
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      final isNarrow = constraints.maxWidth < 900;
+                      final isNarrow = constraints.maxWidth < 980;
 
                       // Builds the row list. `bounded=true` (desktop) means
                       // this sits inside an Expanded with a real height from
@@ -715,14 +715,20 @@ class _AdminActivityLogScreenState extends State<AdminActivityLogScreen> {
       color: Colors.white,
       child: Row(
         children: [
-          Expanded(flex: 2, child: Text(activity.time, style: const TextStyle(fontSize: 12, color: Colors.black87))),
+          Expanded(flex: 2, child: Text(activity.time, style: const TextStyle(fontSize: 12, color: Colors.black87), overflow: TextOverflow.ellipsis)),
           Expanded(
             flex: 2,
             child: Row(
               children: [
                 CircleAvatar(radius: 12, backgroundColor: activity.userAvatarColor, child: Text(activity.userInitials, style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold))),
                 const SizedBox(width: 8),
-                Text(activity.userName, style: const TextStyle(fontSize: 12, color: Colors.black87)),
+                Expanded(
+                  child: Text(
+                    activity.userName,
+                    style: const TextStyle(fontSize: 12, color: Colors.black87),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
             ),
           ),
@@ -757,7 +763,7 @@ class _AdminActivityLogScreenState extends State<AdminActivityLogScreen> {
               ),
             ),
           ),
-          Expanded(flex: 2, child: Text(activity.module, style: const TextStyle(fontSize: 12, color: Colors.black87))),
+          Expanded(flex: 2, child: Text(activity.module, style: const TextStyle(fontSize: 12, color: Colors.black87), overflow: TextOverflow.ellipsis)),
           Expanded(
             flex: 3,
             child: Row(
@@ -768,7 +774,7 @@ class _AdminActivityLogScreenState extends State<AdminActivityLogScreen> {
               ],
             ),
           ),
-          Expanded(flex: 2, child: Text(activity.ipAddress, style: const TextStyle(fontSize: 12, color: Colors.black87))),
+          Expanded(flex: 2, child: Text(activity.ipAddress, style: const TextStyle(fontSize: 12, color: Colors.black87), overflow: TextOverflow.ellipsis)),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, size: 18, color: Colors.grey),
             padding: EdgeInsets.zero,

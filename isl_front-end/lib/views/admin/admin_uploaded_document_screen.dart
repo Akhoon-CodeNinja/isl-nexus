@@ -158,44 +158,67 @@ class _AdminUploadedDocumentScreenState
                   subtitle: "Documents you've uploaded yourself, including any still awaiting approval.",
                 ),
                 Expanded(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Container(
-                          margin: const EdgeInsets.only(left: 32, bottom: 32, right: 16),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: borderLight),
-                            boxShadow: [
-                              BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4)),
-                            ],
-                          ),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final mainListCard = Container(
+                        margin: EdgeInsets.only(
+                          left: 32,
+                          bottom: 32,
+                          right: constraints.maxWidth < 980 ? 32 : 16,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: borderLight),
+                          boxShadow: [
+                            BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4)),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildToolbar(),
+                            const Divider(height: 1),
+                            Expanded(
+                              child: _loading
+                                  ? const Center(child: CircularProgressIndicator())
+                                  : _error != null
+                                      ? _buildErrorState()
+                                      : _filtered.isEmpty
+                                          ? _buildEmptyState()
+                                          : ListView.separated(
+                                              itemCount: _filtered.length,
+                                              separatorBuilder: (_, _) => const Divider(height: 1),
+                                              itemBuilder: (_, i) => _buildRow(_filtered[i]),
+                                            ),
+                            ),
+                          ],
+                        ),
+                      );
+
+                      // Narrow window: stack the list above the summary
+                      // panel, both full-width, instead of squeezing them
+                      // side-by-side (which wrapped row text letter-by-letter).
+                      if (constraints.maxWidth < 980) {
+                        return SingleChildScrollView(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              _buildToolbar(),
-                              const Divider(height: 1),
-                              Expanded(
-                                child: _loading
-                                    ? const Center(child: CircularProgressIndicator())
-                                    : _error != null
-                                        ? _buildErrorState()
-                                        : _filtered.isEmpty
-                                            ? _buildEmptyState()
-                                            : ListView.separated(
-                                                itemCount: _filtered.length,
-                                                separatorBuilder: (_, _) => const Divider(height: 1),
-                                                itemBuilder: (_, i) => _buildRow(_filtered[i]),
-                                              ),
-                              ),
+                              SizedBox(height: 600, child: mainListCard),
+                              _buildSummaryPanel(total, active, pending),
                             ],
                           ),
-                        ),
-                      ),
-                      _buildSummaryPanel(total, active, pending),
-                    ],
+                        );
+                      }
+
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: mainListCard),
+                          _buildSummaryPanel(total, active, pending),
+                        ],
+                      );
+                    },
                   ),
                 ),
               ],

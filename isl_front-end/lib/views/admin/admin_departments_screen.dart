@@ -176,71 +176,90 @@ class _AdminDepartmentsScreenState extends State<AdminDepartmentsScreen> {
                       "Manage company departments and their document access.",
                 ),
                 Expanded(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Main Table Container
-                      Expanded(
-                        child: Container(
-                          margin: const EdgeInsets.only(
-                            left: 32,
-                            bottom: 32,
-                            right: 16,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: borderLight),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.02),
-                                blurRadius: 10,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
-                          ),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final mainTableCard = Container(
+                        margin: EdgeInsets.only(
+                          left: 32,
+                          bottom: 32,
+                          right: constraints.maxWidth < 980 ? 32 : 16,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: borderLight),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.02),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildToolbar(),
+                            const Divider(height: 1),
+                            _buildFiltersRow(),
+                            const Divider(height: 1),
+                            _buildTableHeader(),
+                            const Divider(height: 1),
+                            Expanded(
+                              child: _loading
+                                  ? const Center(
+                                      child: CircularProgressIndicator(),
+                                    )
+                                  : _error != null
+                                  ? _buildErrorState()
+                                  : departmentsList.isEmpty
+                                  ? const Center(
+                                      child: Text(
+                                        'No departments found.',
+                                        style: TextStyle(color: Colors.grey),
+                                      ),
+                                    )
+                                  : ListView.separated(
+                                      itemCount: departmentsList.length,
+                                      separatorBuilder: (context, index) =>
+                                          const Divider(height: 1),
+                                      itemBuilder: (context, index) =>
+                                          _buildTableRow(
+                                            departmentsList[index],
+                                          ),
+                                    ),
+                            ),
+                            const Divider(height: 1),
+                            _buildPaginationFooter(),
+                          ],
+                        ),
+                      );
+
+                      // Narrow window (e.g. sidebar + squeezed browser):
+                      // stack the table and the stats panel full-width
+                      // instead of squeezing them side-by-side, which is
+                      // what caused the table columns to wrap letter-by-
+                      // letter.
+                      if (constraints.maxWidth < 980) {
+                        return SingleChildScrollView(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              _buildToolbar(),
-                              const Divider(height: 1),
-                              _buildFiltersRow(),
-                              const Divider(height: 1),
-                              _buildTableHeader(),
-                              const Divider(height: 1),
-                              Expanded(
-                                child: _loading
-                                    ? const Center(
-                                        child: CircularProgressIndicator(),
-                                      )
-                                    : _error != null
-                                    ? _buildErrorState()
-                                    : departmentsList.isEmpty
-                                    ? const Center(
-                                        child: Text(
-                                          'No departments found.',
-                                          style: TextStyle(color: Colors.grey),
-                                        ),
-                                      )
-                                    : ListView.separated(
-                                        itemCount: departmentsList.length,
-                                        separatorBuilder: (context, index) =>
-                                            const Divider(height: 1),
-                                        itemBuilder: (context, index) =>
-                                            _buildTableRow(
-                                              departmentsList[index],
-                                            ),
-                                      ),
-                              ),
-                              const Divider(height: 1),
-                              _buildPaginationFooter(),
+                              SizedBox(height: 600, child: mainTableCard),
+                              _buildRightPanel(),
                             ],
                           ),
-                        ),
-                      ),
-                      // RHS Panel
-                      _buildRightPanel(),
-                    ],
+                        );
+                      }
+
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: mainTableCard),
+                          _buildRightPanel(),
+                        ],
+                      );
+                    },
                   ),
                 ),
               ],
@@ -534,17 +553,29 @@ class _AdminDepartmentsScreenState extends State<AdminDepartmentsScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            "Showing 1–${departmentsList.length} of ${departmentsList.length} departments",
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+          Expanded(
+            child: Text(
+              "Showing 1–${departmentsList.length} of ${departmentsList.length} departments",
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
-          Row(
-            children: [
-              _buildPageBox(Icons.chevron_left, isIcon: true),
-              _buildPageBox("1", isActive: true),
-              _buildPageBox(Icons.chevron_right, isIcon: true),
-            ],
+          const SizedBox(width: 12),
+          SizedBox(
+            height: 32,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildPageBox(Icons.chevron_left, isIcon: true),
+                  _buildPageBox("1", isActive: true),
+                  _buildPageBox(Icons.chevron_right, isIcon: true),
+                ],
+              ),
+            ),
           ),
+          const SizedBox(width: 12),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
@@ -552,6 +583,7 @@ class _AdminDepartmentsScreenState extends State<AdminDepartmentsScreen> {
               borderRadius: BorderRadius.circular(6),
             ),
             child: const Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text("10 per page", style: TextStyle(fontSize: 12)),
                 SizedBox(width: 8),
@@ -686,9 +718,12 @@ class _AdminDepartmentsScreenState extends State<AdminDepartmentsScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
           Text(
             count,

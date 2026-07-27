@@ -464,7 +464,9 @@ class _AdminUploadDocumentScreenState extends State<AdminUploadDocumentScreen> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            _buildInputLabel("Document Category (Tag)"),
+                            Expanded(
+                              child: _buildInputLabel("Document Category (Tag)"),
+                            ),
                             InkWell(
                               onTap: _selectedDeptId == null ? null : _showAddCategoryDialog,
                               borderRadius: BorderRadius.circular(4),

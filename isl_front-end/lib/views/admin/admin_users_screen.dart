@@ -185,67 +185,88 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                   subtitle: "Manage your department's workers and their upload permissions.",
                 ),
                 Expanded(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Container(
-                          margin: const EdgeInsets.only(left: 32, bottom: 32, right: 16),
-                          decoration: BoxDecoration(
-                            color: Colors.white, 
-                            borderRadius: BorderRadius.circular(12), 
-                            border: Border.all(color: borderLight), 
-                            boxShadow: [
-                              BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))
-                            ]
-                          ),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final mainTableCard = Container(
+                        margin: EdgeInsets.only(
+                          left: 32,
+                          bottom: 32,
+                          right: constraints.maxWidth < 980 ? 32 : 16,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white, 
+                          borderRadius: BorderRadius.circular(12), 
+                          border: Border.all(color: borderLight), 
+                          boxShadow: [
+                            BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))
+                          ]
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildToolbar(),
+                            const Divider(height: 1),
+                            _buildTableHeader(),
+                            const Divider(height: 1),
+                            Expanded(
+                              child: _loading
+                                  ? const Center(child: CircularProgressIndicator())
+                                  : _error != null
+                                      ? Center(
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(Icons.error_outline, color: Colors.red.shade400, size: 32),
+                                              const SizedBox(height: 12),
+                                              Text(_error!, style: const TextStyle(color: Colors.black87)),
+                                              const SizedBox(height: 12),
+                                              OutlinedButton(
+                                                onPressed: _fetchUsers,
+                                                child: const Text('Retry'),
+                                              ),
+                                            ],
+                                          ),
+                                        )
+                                      : displayList.isEmpty
+                                          ? const Center(
+                                              child: Text('No users found matching filters.', style: TextStyle(color: Colors.grey)),
+                                            )
+                                          : ListView.separated(
+                                              itemCount: displayList.length,
+                                              separatorBuilder: (context, index) => const Divider(height: 1),
+                                              itemBuilder: (context, index) => _buildTableRow(displayList[index]),
+                                            ),
+                            ),
+                            const Divider(height: 1),
+                            _buildPagination(displayList.length),
+                          ],
+                        ),
+                      );
+
+                      // Narrow window: stack the table above the overview
+                      // panel, both full-width, instead of squeezing them
+                      // side-by-side (which wrapped column headers letter-
+                      // by-letter, as seen in the "Department Users" screenshot).
+                      if (constraints.maxWidth < 980) {
+                        return SingleChildScrollView(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              _buildToolbar(),
-                              const Divider(height: 1),
-                              _buildTableHeader(),
-                              const Divider(height: 1),
-                              Expanded(
-                                child: _loading
-                                    ? const Center(child: CircularProgressIndicator())
-                                    : _error != null
-                                        ? Center(
-                                            child: Column(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Icon(Icons.error_outline, color: Colors.red.shade400, size: 32),
-                                                const SizedBox(height: 12),
-                                                Text(_error!, style: const TextStyle(color: Colors.black87)),
-                                                const SizedBox(height: 12),
-                                                OutlinedButton(
-                                                  onPressed: _fetchUsers,
-                                                  child: const Text('Retry'),
-                                                ),
-                                              ],
-                                            ),
-                                          )
-                                        : displayList.isEmpty
-                                            ? const Center(
-                                                child: Text('No users found matching filters.', style: TextStyle(color: Colors.grey)),
-                                              )
-                                            : ListView.separated(
-                                                itemCount: displayList.length,
-                                                separatorBuilder: (context, index) => const Divider(height: 1),
-                                                itemBuilder: (context, index) => _buildTableRow(displayList[index]),
-                                              ),
-                              ),
-                              const Divider(height: 1),
-                              _buildPagination(displayList.length),
+                              SizedBox(height: 600, child: mainTableCard),
+                              _buildRightPanel(),
                             ],
                           ),
-                        ),
-                      ),
-                      SizedBox(
-                        width: 260, 
-                        child: _buildRightPanel(),
-                      ),
-                    ],
+                        );
+                      }
+
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: mainTableCard),
+                          SizedBox(width: 260, child: _buildRightPanel()),
+                        ],
+                      );
+                    },
                   ),
                 ),
               ],
@@ -419,14 +440,28 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween, 
         children: [
-          Text("Showing ${currentCount == 0 ? 0 : 1}-$currentCount of ${usersList.length} total users"), 
-          Row(
-            children: [
-              IconButton(onPressed: () {}, icon: const Icon(Icons.chevron_left)), 
-              const Text("1"), 
-              IconButton(onPressed: () {}, icon: const Icon(Icons.chevron_right))
-            ]
+          Expanded(
+            child: Text(
+              "Showing ${currentCount == 0 ? 0 : 1}-$currentCount of ${usersList.length} total users",
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            height: 32,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(onPressed: () {}, icon: const Icon(Icons.chevron_left)), 
+                  const Text("1"), 
+                  IconButton(onPressed: () {}, icon: const Icon(Icons.chevron_right))
+                ]
+              ),
+            ),
           ), 
+          const SizedBox(width: 12),
           _buildDropdown(
             _selectedPerPage, 
             _perPageOptions, 

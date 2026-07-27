@@ -35,6 +35,9 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
 
   // Head's own department id — used ONLY to restrict the "Pending Approval"
   // tab. "All Documents" tab stays unrestricted (all departments).
+  // NOTE: adjust `appState.departmentId` below if your AppState exposes
+  // the logged-in user's department id under a different name/path
+  // (e.g. `appState.currentUser?.departmentId`).
   String? _myDepartmentId;
 
   String selectedDept = 'All Departments';
@@ -58,7 +61,8 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
     _myDepartmentId = appState.departmentId;
 
     // The Department filter should only ever show departments that actually
-    // exist in the Department table
+    // exist in the Department table — not whatever strings happen to show
+    // up in document records (which could be stale, mistyped, or deleted).
     List<String> deptNames = [];
     try {
       final rawDepartments = await _apiService.fetchDepartmentsRaw();
@@ -69,7 +73,8 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
         ..sort();
     } catch (_) {
       // If the departments endpoint fails, fall back to an empty filter
-      // list rather than guessing.
+      // list rather than guessing — showing a department that may not
+      // exist is worse than showing none.
     }
 
     if (!mounted) return;
@@ -169,85 +174,104 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
                       "Manage all AI knowledge documents, SOPs, manuals and policies.",
                 ),
                 Expanded(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Container(
-                          margin: const EdgeInsets.only(
-                            left: 32,
-                            bottom: 32,
-                            right: 16,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: borderLight),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.02),
-                                blurRadius: 10,
-                                offset: const Offset(0, 4),
+                  child: LayoutBuilder(
+                    builder: (context, outerConstraints) {
+                      final mainDocsCard = Container(
+                        margin: EdgeInsets.only(
+                          left: 32,
+                          bottom: 32,
+                          right: outerConstraints.maxWidth < 980 ? 32 : 16,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: borderLight),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.02),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildTabsRow(),
+                            _buildToolbar(),
+                            const Divider(height: 1),
+                            _buildFiltersRow(),
+                            const Divider(height: 1),
+
+                            Expanded(
+                              child: LayoutBuilder(
+                                builder: (context, constraints) {
+                                  double minWidth = 1400;
+                                  double tableWidth =
+                                      constraints.maxWidth > minWidth
+                                      ? constraints.maxWidth
+                                      : minWidth;
+
+                                  return SingleChildScrollView(
+                                    scrollDirection: Axis.horizontal,
+                                    child: SizedBox(
+                                      width: tableWidth,
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                          _buildTableHeader(),
+                                          const Divider(height: 1),
+                                          Expanded(
+                                            child: ListView.separated(
+                                              itemCount: documentsList.length,
+                                              separatorBuilder:
+                                                  (context, index) =>
+                                                      const Divider(
+                                                        height: 1,
+                                                      ),
+                                              itemBuilder: (context, index) =>
+                                                  _buildTableRow(
+                                                    documentsList[index],
+                                                  ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
                               ),
-                            ],
-                          ),
+                            ),
+                            const Divider(height: 1),
+                            _buildPaginationFooter(),
+                          ],
+                        ),
+                      );
+
+                      // Narrow window: stack the docs table above the AI
+                      // panel, both full-width, instead of squeezing them
+                      // side-by-side (which overflowed the tabs row).
+                      if (outerConstraints.maxWidth < 980) {
+                        return SingleChildScrollView(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              _buildTabsRow(),
-                              _buildToolbar(),
-                              const Divider(height: 1),
-                              _buildFiltersRow(),
-                              const Divider(height: 1),
-
-                              Expanded(
-                                child: LayoutBuilder(
-                                  builder: (context, constraints) {
-                                    double minWidth = 1400;
-                                    double tableWidth =
-                                        constraints.maxWidth > minWidth
-                                        ? constraints.maxWidth
-                                        : minWidth;
-
-                                    return SingleChildScrollView(
-                                      scrollDirection: Axis.horizontal,
-                                      child: SizedBox(
-                                        width: tableWidth,
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.stretch,
-                                          children: [
-                                            _buildTableHeader(),
-                                            const Divider(height: 1),
-                                            Expanded(
-                                              child: ListView.separated(
-                                                itemCount: documentsList.length,
-                                                separatorBuilder:
-                                                    (context, index) =>
-                                                        const Divider(
-                                                          height: 1,
-                                                        ),
-                                                itemBuilder: (context, index) =>
-                                                    _buildTableRow(
-                                                      documentsList[index],
-                                                    ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                              ),
-                              const Divider(height: 1),
-                              _buildPaginationFooter(),
+                              SizedBox(height: 650, child: mainDocsCard),
+                              _buildAIPanel(),
                             ],
                           ),
-                        ),
-                      ),
-                      _buildAIPanel(),
-                    ],
+                        );
+                      }
+
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: mainDocsCard),
+                          _buildAIPanel(),
+                        ],
+                      );
+                    },
                   ),
                 ),
               ],
@@ -331,7 +355,8 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
     );
   }
 
-  // Approves a pending document via AppState -> ApiService.approveDocument
+  // NEW: Approves a pending document via AppState -> ApiService.approveDocument,
+  // then refreshes the list so it moves out of "Pending Approval".
   Future<void> _handleApprove(DocumentItem doc) async {
     final appState = context.read<AppState>();
     ScaffoldMessenger.of(context).showSnackBar(
@@ -355,36 +380,6 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to approve: ${appState.error}'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-
-    await _fetchDocuments();
-  }
-
-  // NAYA: Rejects a pending document via AppState -> ApiService.rejectDocument
-  Future<void> _handleReject(DocumentItem doc) async {
-    final appState = context.read<AppState>();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Rejecting "${doc.title}"...')),
-    );
-
-    await appState.rejectDocument(doc.id);
-
-    if (!mounted) return;
-
-    if (appState.error == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('"${doc.title}" has been rejected.'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to reject: ${appState.error}'),
           backgroundColor: Colors.red,
         ),
       );
@@ -570,9 +565,7 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
               onChanged: (v) {
                 setState(() {
                   isAllSelected = v ?? false;
-                  for (var doc in documentsList) {
-                    doc.isSelected = isAllSelected;
-                  }
+                  for (var doc in documentsList) doc.isSelected = isAllSelected;
                 });
               },
             ),
@@ -804,27 +797,6 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
                     ),
                   ),
                 ],
-                if (doc.approvalStatus.toUpperCase() == 'REJECTED') ...[
-                  const SizedBox(height: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 1,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.red.shade50,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      'REJECTED',
-                      style: TextStyle(
-                        fontSize: 9,
-                        color: Colors.red.shade800,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
               ],
             ),
           ),
@@ -876,6 +848,7 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
+                // --- CONDITION: VIEW BUTTON WILL ONLY BE DISPLAYED FOR PDF FILES ---
                 if (displayType == 'PDF')
                   GestureDetector(
                     onTap: () async {
@@ -919,6 +892,7 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
                     child: _buildActionIcon(Icons.remove_red_eye_outlined),
                   ),
 
+                // --- DOWNLOAD BUTTON WILL BE DISPLAYED FOR ALL FILES ---
                 GestureDetector(
                   onTap: () async {
                     try {
@@ -961,9 +935,9 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
                   child: _buildActionIcon(Icons.download_outlined),
                 ),
 
-                // --- APPROVE AND REJECT BUTTONS ---
-                // Show these only if the document is still PENDING
-                if (doc.approvalStatus.toUpperCase() == 'PENDING') ...[
+                // --- APPROVE BUTTON: only shown for documents still
+                // awaiting Head approval ---
+                if (doc.approvalStatus.toUpperCase() == 'PENDING')
                   GestureDetector(
                     onTap: () => _handleApprove(doc),
                     child: Container(
@@ -996,45 +970,11 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
                         ],
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  GestureDetector(
-                    onTap: () => _handleReject(doc),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.red.shade50,
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: Colors.red.shade200),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.cancel_outlined,
-                            size: 14,
-                            color: Colors.red.shade700,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Reject',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.red.shade700,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ] else
+                  )
+                else
                   Switch(
                     value: doc.isActive,
-                    activeThumbColor: Colors.green,
+                    activeColor: Colors.green,
                     onChanged: (val) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
