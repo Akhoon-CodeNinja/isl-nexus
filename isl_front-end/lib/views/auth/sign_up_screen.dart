@@ -147,7 +147,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     }
 
     return DropdownButtonFormField<int>(
-      value: _selectedDepartmentId,
+      initialValue: _selectedDepartmentId,
       decoration: InputDecoration(
         prefixIcon: const Icon(Icons.domain, color: Colors.grey),
         filled: true,

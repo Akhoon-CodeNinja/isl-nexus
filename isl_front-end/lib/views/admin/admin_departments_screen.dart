@@ -710,8 +710,9 @@ class _AdminDepartmentsScreenState extends State<AdminDepartmentsScreen> {
       final maxUsers = departmentsList
           .map((d) => d.usersCount)
           .reduce((a, b) => a > b ? a : b);
-      if (maxUsers > 0)
+      if (maxUsers > 0) {
         maxY = maxUsers.toDouble() * 1.2; // Add 20% padding to top
+      }
     }
 
     return Container(
@@ -813,8 +814,9 @@ class _AdminDepartmentsScreenState extends State<AdminDepartmentsScreen> {
                             reservedSize: 30,
                             getTitlesWidget: (value, meta) {
                               // Only showing integer values for employees
-                              if (value % 1 != 0)
+                              if (value % 1 != 0) {
                                 return const SizedBox.shrink();
+                              }
                               return Text(
                                 value.toInt().toString(),
                                 style: const TextStyle(

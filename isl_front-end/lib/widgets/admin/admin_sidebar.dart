@@ -12,6 +12,8 @@ import 'package:isl_app/views/admin/admin_settings_screen.dart';
 import 'package:isl_app/views/auth/login_screen.dart';
 // Nayi Notification screen ka import add kiya gaya hai
 import 'package:isl_app/views/admin/admin_send_notification_screen.dart';
+// Naya AI Assistant chat screen ka import
+import 'package:isl_app/views/admin/admin_chat_screen.dart';
 
 class AdminSidebar extends StatelessWidget {
   final String activeItem;
@@ -79,83 +81,104 @@ class AdminSidebar extends StatelessWidget {
             ),
           ),
 
-          _NavItem(
-            icon: Icons.home_outlined,
-            title: "Dashboard",
-            isActive: activeItem == "Dashboard",
-            onTap: activeItem == "Dashboard"
-                ? null
-                : () => _navigateTo(context, const AdminDashboardScreen()),
-          ),
-          _NavItem(
-            icon: Icons.business,
-            title: "Departments",
-            isActive: activeItem == "Departments",
-            onTap: activeItem == "Departments"
-                ? null
-                : () => _navigateTo(context, const AdminDepartmentsScreen()),
-          ),
-          _NavItem(
-            icon: Icons.description_outlined,
-            title: "All Documents",
-            isActive: activeItem == "Documents",
-            onTap: activeItem == "Documents"
-                ? null
-                : () => _navigateTo(context, const AdminDocumentsScreen()),
-          ),
-          _NavItem(
-            icon: Icons.cloud_upload_outlined,
-            title: "Add Document",
-            isActive: activeItem == "Upload Document",
-            onTap: activeItem == "Upload Document"
-                ? null
-                : () => _navigateTo(context, AdminUploadDocumentScreen()), 
-          ),
-          _NavItem(
-            icon: Icons.file_present_rounded,
-            title: "My Uploads",
-            isActive: activeItem == "Uploaded Documents",
-            onTap: activeItem == "Uploaded Documents"
-                ? null
-                : () => _navigateTo(context, AdminUploadedDocumentScreen()), 
-          ),
-          _NavItem(
-            icon: Icons.history,
-            title: "Activity Log",
-            isActive: activeItem == "Activity Log",
-            onTap: activeItem == "Activity Log"
-                ? null
-                : () => _navigateTo(context, const AdminActivityLogScreen()),
-          ),
-          
-          // ── Naya Notifications Button ──
-          _NavItem(
-            icon: Icons.notifications_active_outlined,
-            title: "Notifications",
-            isActive: activeItem == "Notifications",
-            onTap: activeItem == "Notifications"
-                ? null
-                : () => _navigateTo(context, const AdminSendNotificationScreen()),
-          ),
+          // Nav items now live in a scrollable, flex-sized area instead of
+          // sitting directly in the outer Column. With 10 fixed-height
+          // items + header + logout footer, a short browser window (e.g.
+          // ~700px tall) doesn't have room for everything, which was
+          // throwing "RenderFlex overflowed" here. Expanded+scroll lets it
+          // shrink/scroll instead of overflowing; tall windows still look
+          // identical to before.
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
+                  _NavItem(
+                    icon: Icons.home_outlined,
+                    title: "Dashboard",
+                    isActive: activeItem == "Dashboard",
+                    onTap: activeItem == "Dashboard"
+                        ? null
+                        : () => _navigateTo(context, const AdminDashboardScreen()),
+                  ),
+                  _NavItem(
+                    icon: Icons.smart_toy_outlined,
+                    title: "AI Assistant",
+                    isActive: activeItem == "AI Assistant",
+                    onTap: activeItem == "AI Assistant"
+                        ? null
+                        : () => _navigateTo(context, const AdminChatScreen()),
+                  ),
+                  _NavItem(
+                    icon: Icons.business,
+                    title: "Departments",
+                    isActive: activeItem == "Departments",
+                    onTap: activeItem == "Departments"
+                        ? null
+                        : () => _navigateTo(context, const AdminDepartmentsScreen()),
+                  ),
+                  _NavItem(
+                    icon: Icons.description_outlined,
+                    title: "All Documents",
+                    isActive: activeItem == "Documents",
+                    onTap: activeItem == "Documents"
+                        ? null
+                        : () => _navigateTo(context, const AdminDocumentsScreen()),
+                  ),
+                  _NavItem(
+                    icon: Icons.cloud_upload_outlined,
+                    title: "Add Document",
+                    isActive: activeItem == "Upload Document",
+                    onTap: activeItem == "Upload Document"
+                        ? null
+                        : () => _navigateTo(context, AdminUploadDocumentScreen()),
+                  ),
+                  _NavItem(
+                    icon: Icons.file_present_rounded,
+                    title: "My Uploads",
+                    isActive: activeItem == "Uploaded Documents",
+                    onTap: activeItem == "Uploaded Documents"
+                        ? null
+                        : () => _navigateTo(context, AdminUploadedDocumentScreen()),
+                  ),
+                  _NavItem(
+                    icon: Icons.history,
+                    title: "Activity Log",
+                    isActive: activeItem == "Activity Log",
+                    onTap: activeItem == "Activity Log"
+                        ? null
+                        : () => _navigateTo(context, const AdminActivityLogScreen()),
+                  ),
 
-          _NavItem(
-            icon: Icons.people_outline,
-            title: "Users",
-            isActive: activeItem == "Users",
-            onTap: activeItem == "Users"
-                ? null
-                : () => _navigateTo(context, const AdminUsersScreen()),
-          ),
-          _NavItem(
-            icon: Icons.settings_outlined,
-            title: "Settings",
-            isActive: activeItem == "Settings",
-            onTap: activeItem == "Settings"
-                ? null
-                : () => _navigateTo(context, const AdminSettingsScreen()),
-          ),
+                  // ── Naya Notifications Button ──
+                  _NavItem(
+                    icon: Icons.notifications_active_outlined,
+                    title: "Notifications",
+                    isActive: activeItem == "Notifications",
+                    onTap: activeItem == "Notifications"
+                        ? null
+                        : () => _navigateTo(context, const AdminSendNotificationScreen()),
+                  ),
 
-          const Spacer(),
+                  _NavItem(
+                    icon: Icons.people_outline,
+                    title: "Users",
+                    isActive: activeItem == "Users",
+                    onTap: activeItem == "Users"
+                        ? null
+                        : () => _navigateTo(context, const AdminUsersScreen()),
+                  ),
+                  _NavItem(
+                    icon: Icons.settings_outlined,
+                    title: "Settings",
+                    isActive: activeItem == "Settings",
+                    onTap: activeItem == "Settings"
+                        ? null
+                        : () => _navigateTo(context, const AdminSettingsScreen()),
+                  ),
+                ],
+              ),
+            ),
+          ),
 
           Container(
             padding: const EdgeInsets.all(20),

@@ -1,7 +1,6 @@
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-# UPDATE: Added AuditLog to imports
 from .models import Department, Tag, Document, Alert, ChatSession, ChatMessage, AuditLog, SystemSettings
 
 User = get_user_model()
@@ -33,24 +32,16 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             data['department_id'] = None
             data['department_name'] = None
 
-        # NOTE: the top-level fields above (role, full_name, department_id,
-        # department_name) are kept as-is — AuthSession.fromJson() on the
-        # Flutter side (used by AppState / admin sidebar / admin header)
-        # reads exactly those. Some other frontend code (e.g.
-        # worker_header.dart) expects a nested `user.department_details`
-        # shape instead, so both are sent rather than picking one and
-        # breaking the other.
         data['user'] = {
             'id': str(self.user.id),
             'full_name': self.user.full_name,
             'role': self.user.role,
             'department_details': department_details,
             'shift_timing': self.user.shift_timing or '',
+            'can_manage_docs': self.user.can_manage_docs,
         }
 
         return data
-
-# --- Standard Model Serializers ---
 
 class DepartmentSerializer(serializers.ModelSerializer):
     users_count = serializers.SerializerMethodField()
@@ -79,7 +70,6 @@ class DepartmentSerializer(serializers.ModelSerializer):
 
 
 class UserMinimalSerializer(serializers.ModelSerializer):
-    """Read-only serializer for nested user data."""
     class Meta:
         model = User
         fields = ['id', 'employee_id', 'full_name', 'role'] 
@@ -93,18 +83,10 @@ class UserListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'employee_id', 'full_name', 'email', 'role',
             'department_details', 'is_active', 'last_login', 'date_joined',
-            'shift_timing',
+            'shift_timing', 'can_manage_docs'
         ]
 
 class MeSerializer(serializers.ModelSerializer):
-    """Used for GET/PATCH /api/auth/me/ — a user editing their own profile.
-
-    Deliberately much stricter than UserListSerializer: only full_name
-    and email are writable. role, employee_id, department, is_active,
-    and shift_timing are admin-assigned and must stay read-only here,
-    or any authenticated worker could PATCH their own role to
-    DEPARTMENT_HEAD.
-    """
     department_details = DepartmentSerializer(source='department', read_only=True)
 
     class Meta:
@@ -112,7 +94,7 @@ class MeSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'employee_id', 'full_name', 'email', 'role',
             'department_details', 'is_active', 'last_login', 'date_joined',
-            'shift_timing',
+            'shift_timing','can_manage_docs'
         ]
         read_only_fields = [
             'id', 'employee_id', 'role', 'department_details',
@@ -126,13 +108,6 @@ class TagSerializer(serializers.ModelSerializer):
 
 class DocumentSerializer(serializers.ModelSerializer):
     uploaded_by_details = UserMinimalSerializer(source='uploaded_by', read_only=True)
-    # Multi-department documents: a document can now belong to more than
-    # one department. This is read-only here on purpose — writing it is
-    # handled manually in DocumentViewSet.perform_create, because the
-    # Flutter multipart upload sends department IDs as a single
-    # comma-separated field (`departments=id1,id2`) rather than the
-    # repeated-key form DRF's ManyRelatedField expects from HTML/multipart
-    # input.
     departments_details = DepartmentSerializer(source='departments', many=True, read_only=True)
     tags_details = TagSerializer(source='tags', many=True, read_only=True)
 
@@ -147,6 +122,7 @@ class DocumentSerializer(serializers.ModelSerializer):
         ]
         extra_kwargs = {
             'uploaded_by': {'write_only': True, 'required': False},
+            'is_active': {'read_only': True}, # NAYA CHANGE: User upload time is_active set nahi kar sakta
         }
 
 class AlertSerializer(serializers.ModelSerializer):
@@ -166,10 +142,6 @@ class AlertSerializer(serializers.ModelSerializer):
         }
 
     def get_is_read(self, obj):
-        # AlertViewSet.get_queryset annotates this as an Exists() subquery
-        # so listing alerts stays a single query instead of N+1. Fall back
-        # to a direct lookup for any other path that instantiates this
-        # serializer without that annotation (e.g. a bare .get() call).
         if hasattr(obj, 'is_read_annotated'):
             return bool(obj.is_read_annotated)
         request = self.context.get('request')
@@ -178,20 +150,13 @@ class AlertSerializer(serializers.ModelSerializer):
         return obj.read_receipts.filter(user=request.user).exists()
 
 class LeaveApplicationSerializer(serializers.Serializer):
-    """Validates input from the chatbot's leave-application form. Not tied
-    to a model -- the actual record created on submit is an Alert (see
-    LeaveApplicationView in views.py), since a dedicated Leave model does
-    not exist in this schema."""
-
     LEAVE_TYPE_CHOICES = (
         ("SICK", "Sick Leave"),
         ("CASUAL", "Casual Leave"),
         ("ANNUAL", "Annual Leave"),
     )
-
     leave_type = serializers.ChoiceField(choices=LEAVE_TYPE_CHOICES)
     reason = serializers.CharField(required=False, allow_blank=True, max_length=1000)
-
 
 class ChatSessionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -207,9 +172,6 @@ class ChatMessageSerializer(serializers.ModelSerializer):
             'cited_document', 'is_helpful', 'created_at'
         ]
 
-# ---------------------------------------------------------
-# NAYA SERIALIZER: AUDIT LOG KE LIYE
-# ---------------------------------------------------------
 class AuditLogSerializer(serializers.ModelSerializer):
     user_details = UserMinimalSerializer(source='user', read_only=True)
     module = serializers.CharField(source='entity_type', read_only=True)
@@ -223,11 +185,6 @@ class AuditLogSerializer(serializers.ModelSerializer):
         ]
 
     def get_details(self, obj):
-        """Resolves entity_id into the actual name of whatever was acted
-        on, rather than a bare (truncated) UUID that means nothing to an
-        admin reading the log. Falls back to the ID if the target has
-        since been deleted, so the row is still informative.
-        """
         if not obj.entity_id:
             return "System action"
 
@@ -242,16 +199,8 @@ class AuditLogSerializer(serializers.ModelSerializer):
         elif obj.entity_type == "SystemSettings":
             return "System Settings"
 
-        # Target no longer exists (deleted since), or an entity_type we
-        # don't have a name lookup for yet — fall back to a truncated ID
-        # rather than crashing or showing nothing.
         return f"{obj.entity_type} (deleted) — {str(obj.entity_id)[:8]}..."
 
-
-# ---------------------------------------------------------
-# System Settings — real, enforced config (see SystemSettings model
-# for exactly where each field is read on the backend).
-# ---------------------------------------------------------
 class SystemSettingsSerializer(serializers.ModelSerializer):
     updated_by_details = UserMinimalSerializer(source='updated_by', read_only=True)
 

@@ -31,6 +31,11 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
   List<String> dynamicDepartments = ["All Departments"];
 
   bool isAllSelected = false;
+  bool _pendingOnly = false; // NEW: Head's "Pending Approval" tab/filter
+
+  // Head's own department id — used ONLY to restrict the "Pending Approval"
+  // tab. "All Documents" tab stays unrestricted (all departments).
+  String? _myDepartmentId;
 
   String selectedDept = 'All Departments';
   String selectedStatus = 'All Status';
@@ -50,9 +55,10 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
 
     if (!mounted) return;
 
+    _myDepartmentId = appState.departmentId;
+
     // The Department filter should only ever show departments that actually
-    // exist in the Department table — not whatever strings happen to show
-    // up in document records (which could be stale, mistyped, or deleted).
+    // exist in the Department table
     List<String> deptNames = [];
     try {
       final rawDepartments = await _apiService.fetchDepartmentsRaw();
@@ -63,8 +69,7 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
         ..sort();
     } catch (_) {
       // If the departments endpoint fails, fall back to an empty filter
-      // list rather than guessing — showing a department that may not
-      // exist is worse than showing none.
+      // list rather than guessing.
     }
 
     if (!mounted) return;
@@ -90,6 +95,21 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
             doc.documentNumber.toLowerCase().contains(_searchQuery) ||
             doc.department.toLowerCase().contains(_searchQuery);
       }).toList();
+    }
+
+    if (_pendingOnly) {
+      filtered = filtered
+          .where((doc) => doc.approvalStatus.toUpperCase() == 'PENDING')
+          .toList();
+
+      // Restriction is only for the Pending Approval tab — Head sees
+      // every department's documents in "All Documents", but only their
+      // own department's pending items here.
+      if (_myDepartmentId != null && _myDepartmentId!.isNotEmpty) {
+        filtered = filtered
+            .where((doc) => doc.departmentIds.contains(_myDepartmentId))
+            .toList();
+      }
     }
 
     if (selectedDept != 'All Departments') {
@@ -174,6 +194,7 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
+                              _buildTabsRow(),
                               _buildToolbar(),
                               const Divider(height: 1),
                               _buildFiltersRow(),
@@ -235,6 +256,141 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
         ],
       ),
     );
+  }
+
+  // NEW: "All Documents" / "Pending Approval" tabs — Head's document
+  // approval workflow entry point.
+  Widget _buildTabsRow() {
+    final pendingCount = allDocuments
+        .where((d) => d.approvalStatus.toUpperCase() == 'PENDING')
+        .where(
+          (d) =>
+              _myDepartmentId == null ||
+              _myDepartmentId!.isEmpty ||
+              d.departmentIds.contains(_myDepartmentId),
+        )
+        .length;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Row(
+        children: [
+          _buildTabChip(
+            'All Documents',
+            selected: !_pendingOnly,
+            onTap: () => setState(() {
+              _pendingOnly = false;
+              _applyFilters();
+            }),
+          ),
+          const SizedBox(width: 10),
+          _buildTabChip(
+            'Pending Approval ($pendingCount)',
+            selected: _pendingOnly,
+            highlight: pendingCount > 0,
+            onTap: () => setState(() {
+              _pendingOnly = true;
+              _applyFilters();
+            }),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTabChip(
+    String label, {
+    required bool selected,
+    required VoidCallback onTap,
+    bool highlight = false,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? primaryBlue : Colors.white,
+          border: Border.all(
+            color: selected
+                ? primaryBlue
+                : (highlight ? Colors.orange.shade300 : borderLight),
+          ),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: selected
+                ? Colors.white
+                : (highlight ? Colors.orange.shade800 : Colors.black87),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Approves a pending document via AppState -> ApiService.approveDocument
+  Future<void> _handleApprove(DocumentItem doc) async {
+    final appState = context.read<AppState>();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Approving "${doc.title}"...')),
+    );
+
+    await appState.approveDocument(doc.id);
+
+    if (!mounted) return;
+
+    if (appState.error == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '"${doc.title}" approved — now active and synced to AI knowledge base.',
+          ),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to approve: ${appState.error}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+
+    await _fetchDocuments();
+  }
+
+  // NAYA: Rejects a pending document via AppState -> ApiService.rejectDocument
+  Future<void> _handleReject(DocumentItem doc) async {
+    final appState = context.read<AppState>();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Rejecting "${doc.title}"...')),
+    );
+
+    await appState.rejectDocument(doc.id);
+
+    if (!mounted) return;
+
+    if (appState.error == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('"${doc.title}" has been rejected.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to reject: ${appState.error}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+
+    await _fetchDocuments();
   }
 
   Widget _buildToolbar() {
@@ -414,7 +570,9 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
               onChanged: (v) {
                 setState(() {
                   isAllSelected = v ?? false;
-                  for (var doc in documentsList) doc.isSelected = isAllSelected;
+                  for (var doc in documentsList) {
+                    doc.isSelected = isAllSelected;
+                  }
                 });
               },
             ),
@@ -598,27 +756,75 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
           ),
           Expanded(
             flex: 2,
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: doc.isActive ? Colors.green : Colors.grey,
-                    shape: BoxShape.circle,
-                  ),
+                Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: doc.isActive ? Colors.green : Colors.grey,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      doc.isActive ? "Active" : "Inactive",
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: doc.isActive
+                            ? Colors.green.shade700
+                            : Colors.grey.shade700,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 6),
-                Text(
-                  doc.isActive ? "Active" : "Inactive",
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: doc.isActive
-                        ? Colors.green.shade700
-                        : Colors.grey.shade700,
-                    fontWeight: FontWeight.w600,
+                if (doc.approvalStatus.toUpperCase() == 'PENDING') ...[
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 1,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'PENDING',
+                      style: TextStyle(
+                        fontSize: 9,
+                        color: Colors.orange.shade800,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
-                ),
+                ],
+                if (doc.approvalStatus.toUpperCase() == 'REJECTED') ...[
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 1,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'REJECTED',
+                      style: TextStyle(
+                        fontSize: 9,
+                        color: Colors.red.shade800,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -670,7 +876,6 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                // --- CONDITION: VIEW BUTTON WILL ONLY BE DISPLAYED FOR PDF FILES ---
                 if (displayType == 'PDF')
                   GestureDetector(
                     onTap: () async {
@@ -714,7 +919,6 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
                     child: _buildActionIcon(Icons.remove_red_eye_outlined),
                   ),
 
-                // --- DOWNLOAD BUTTON WILL BE DISPLAYED FOR ALL FILES ---
                 GestureDetector(
                   onTap: () async {
                     try {
@@ -757,20 +961,91 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
                   child: _buildActionIcon(Icons.download_outlined),
                 ),
 
-                Switch(
-                  value: doc.isActive,
-                  activeColor: Colors.green,
-                  onChanged: (val) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Status cannot be changed from this read-only view.',
-                        ),
-                        backgroundColor: Colors.orange,
+                // --- APPROVE AND REJECT BUTTONS ---
+                // Show these only if the document is still PENDING
+                if (doc.approvalStatus.toUpperCase() == 'PENDING') ...[
+                  GestureDetector(
+                    onTap: () => _handleApprove(doc),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
                       ),
-                    );
-                  },
-                ),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.green.shade200),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.check_circle_outline,
+                            size: 14,
+                            color: Colors.green.shade700,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Approve',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.green.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () => _handleReject(doc),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.red.shade200),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.cancel_outlined,
+                            size: 14,
+                            color: Colors.red.shade700,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Reject',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.red.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ] else
+                  Switch(
+                    value: doc.isActive,
+                    activeThumbColor: Colors.green,
+                    onChanged: (val) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Status cannot be changed from this read-only view.',
+                          ),
+                          backgroundColor: Colors.orange,
+                        ),
+                      );
+                    },
+                  ),
               ],
             ),
           ),

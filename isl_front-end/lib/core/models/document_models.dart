@@ -5,6 +5,7 @@ class DocumentItem {
     required this.documentNumber,
     required this.type,
     required this.department,
+    this.departmentIds = const [],
     required this.version,
     required this.updatedAt,
     required this.uploadedByName,
@@ -13,6 +14,7 @@ class DocumentItem {
     required this.isActive,
     required this.status,
     required this.url,
+    required this.approvalStatus, // Naya field
     this.isSelected = false,
   });
 
@@ -21,14 +23,16 @@ class DocumentItem {
   final String documentNumber;
   final String type;
   final String department;
+  final List<String> departmentIds;
   final String version;
   final String updatedAt;
   final String uploadedByName;
   final String uploadedByInitials;
-  final String uploadedById; // needed client-side to show/hide the toggle
+  final String uploadedById; 
   final bool isActive;
   final String status;
   final String url;
+  final String approvalStatus; // Naya field
   bool isSelected;
 
   static bool _parseBool(dynamic v) {
@@ -41,16 +45,25 @@ class DocumentItem {
   }
 
   factory DocumentItem.fromJson(Map<String, dynamic> json) {
-    // Real data lives under these nested objects — see DocumentSerializer:
-    // `department` / `uploaded_by` are write_only, so the response only
-    // ever contains `department_details` / `uploaded_by_details`.
-    final deptDetails = json['department_details'];
+    // Backend sends 'departments_details' (plural — a document can belong
+    // to more than one department), NOT a singular 'department_details'.
+    // We join all linked department names so nothing gets silently dropped.
+    final deptList = json['departments_details'];
     final uploaderDetails = json['uploaded_by_details'];
 
-    final departmentName = (deptDetails is Map ? deptDetails['name'] : null)
-            as String? ??
-        (json['department'] is String ? json['department'] as String : null) ??
-        '';
+    final departmentName = (deptList is List && deptList.isNotEmpty)
+        ? deptList
+            .map((d) => (d is Map ? d['name'] : null)?.toString() ?? '')
+            .where((n) => n.isNotEmpty)
+            .join(', ')
+        : '';
+
+    final departmentIdList = (deptList is List)
+        ? deptList
+            .map((d) => (d is Map ? d['id'] : null)?.toString() ?? '')
+            .where((idStr) => idStr.isNotEmpty)
+            .toList()
+        : <String>[];
 
     final uploaderName =
         (uploaderDetails is Map ? uploaderDetails['full_name'] : null)
@@ -58,7 +71,6 @@ class DocumentItem {
             (json['uploaded_by_name'] as String?) ??
             '';
 
-    // Yeh wali line update karni hai
     final uploaderId =
         (uploaderDetails is Map ? uploaderDetails['id'] : null)?.toString() ??
         (json['uploaded_by']?.toString()) ??
@@ -73,6 +85,7 @@ class DocumentItem {
           .toString(),
       type: (json['file_type'] ?? json['type'] ?? 'PDF').toString(),
       department: departmentName,
+      departmentIds: departmentIdList,
       version: (json['version'] ?? 'v1').toString(),
       updatedAt: (json['updated_at'] ?? json['updatedAt'] ?? '').toString(),
       uploadedByName: uploaderName,
@@ -81,6 +94,7 @@ class DocumentItem {
       isActive: active,
       status: active ? 'active' : 'inactive',
       url: (json['file_url'] ?? json['url'] ?? '').toString(),
+      approvalStatus: (json['approval_status'] ?? 'PENDING').toString(), // Parsing
       isSelected: false,
     );
   }

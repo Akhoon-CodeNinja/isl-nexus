@@ -15,3 +15,12 @@ build/
 .idea/
 .vscode/
 .DS_Store
+
+
+# Media and User Uploads
+isl_backend/media/
+
+# FAISS Vector Database Files
+isl_backend/faiss_index/*.faiss
+isl_backend/faiss_index/*.pkl
+isl_backend/faiss_index/sync_timestamp.txt

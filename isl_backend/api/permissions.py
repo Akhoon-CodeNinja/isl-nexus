@@ -1,10 +1,7 @@
 from rest_framework import permissions
 
+
 class IsDepartmentHeadOrReadOnly(permissions.BasePermission):
-    """
-    WORKER can only read (GET, HEAD, OPTIONS).
-    DEPARTMENT_HEAD can read and write (POST, PUT, PATCH, DELETE)[cite: 1].
-    """
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
@@ -12,8 +9,8 @@ class IsDepartmentHeadOrReadOnly(permissions.BasePermission):
         if request.method in permissions.SAFE_METHODS:
             return True
             
-        # Write permissions are only allowed to DEPARTMENT_HEAD
-        return request.user.role == 'DEPARTMENT_HEAD' # References Role.DEPARTMENT_HEAD[cite: 1]
+        # Write permissions: HEAD ko ya un Workers ko jinko access assign hui hai
+        return (request.user.role == 'DEPARTMENT_HEAD') or getattr(request.user, 'can_manage_docs', False)
 
 class IsDepartmentHead(permissions.BasePermission):
     """Strictly for endpoints only available to Heads."""

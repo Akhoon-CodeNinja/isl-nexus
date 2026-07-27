@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:isl_app/widgets/admin/admin_sidebar.dart';
 import 'package:isl_app/widgets/admin/admin_top_header.dart';
 import 'package:isl_app/views/admin/admin_documents_screen.dart'; 
+import 'package:isl_app/views/worker/worker_documents_screen.dart';
 
 class AdminUploadDocumentScreen extends StatefulWidget {
   const AdminUploadDocumentScreen({super.key});
@@ -43,7 +44,6 @@ class _AdminUploadDocumentScreenState extends State<AdminUploadDocumentScreen> {
   String? _selectedCategoryId;
   String? _selectedFileType; // 'PDF' or 'DOCX'
 
-  bool _isActive = true;
   PlatformFile? _pickedFile;
 
   bool _isFetchingData = true;
@@ -166,16 +166,21 @@ class _AdminUploadDocumentScreenState extends State<AdminUploadDocumentScreen> {
   // --- API 2: UPLOAD DOCUMENT ---
   Future<void> _uploadDocument() async {
     // 1. Validation
-    if (_titleCtrl.text.trim().isEmpty)
+    if (_titleCtrl.text.trim().isEmpty) {
       return _showSnackBar("Please enter Document Title.", isError: true);
-    if (_docNumberCtrl.text.trim().isEmpty)
+    }
+    if (_docNumberCtrl.text.trim().isEmpty) {
       return _showSnackBar("Please enter Document Number.", isError: true);
-    if (_selectedDeptIds.isEmpty)
+    }
+    if (_selectedDeptIds.isEmpty) {
       return _showSnackBar("Please select at least one Department.", isError: true);
-    if (_selectedFileType == null)
+    }
+    if (_selectedFileType == null) {
       return _showSnackBar("Please select a File Type.", isError: true);
-    if (_pickedFile == null)
+    }
+    if (_pickedFile == null) {
       return _showSnackBar("Please attach a file.", isError: true);
+    }
 
     setState(() => _isUploading = true);
 
@@ -197,7 +202,7 @@ class _AdminUploadDocumentScreenState extends State<AdminUploadDocumentScreen> {
       request.fields['version'] = _versionCtrl.text.trim().isEmpty
           ? '1.0'
           : _versionCtrl.text.trim();
-      request.fields['is_active'] = _isActive ? 'True' : 'False';
+      
       // Comma-separated list of department IDs — the backend
       // (DocumentViewSet.perform_create) splits this and links the
       // document to every department named here, so all of their
@@ -234,10 +239,21 @@ class _AdminUploadDocumentScreenState extends State<AdminUploadDocumentScreen> {
       if (response.statusCode == 201 || response.statusCode == 200) {
         _showSnackBar("Document Uploaded Successfully!", isError: false);
         if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const AdminDocumentsScreen()),
-          );
+          // NEW: Worker uploads land back on their own Documents screen,
+          // not the Head's admin panel — only a DEPARTMENT_HEAD (or ADMIN)
+          // gets sent to AdminDocumentsScreen.
+          final role = (prefs.getString('role') ?? '').toUpperCase();
+          if (role == 'DEPARTMENT_HEAD' || role == 'ADMIN') {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const AdminDocumentsScreen()),
+            );
+          } else {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const WorkerDocumentsScreen()),
+            );
+          }
         }
       } else {
         String resBody = await response.stream.bytesToString();
@@ -583,33 +599,6 @@ class _AdminUploadDocumentScreenState extends State<AdminUploadDocumentScreen> {
                 hintText: "e.g. SOP-001",
               ),
 
-              const SizedBox(height: 24),
-
-              const Text(
-                "Status",
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                  color: Colors.black87,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  _buildStatusRadio(
-                    true,
-                    "Active",
-                    "Document is available for AI and users",
-                  ),
-                  const SizedBox(width: 30),
-                  _buildStatusRadio(
-                    false,
-                    "Inactive",
-                    "Document will be stored but not active",
-                  ),
-                ],
-              ),
-
               const SizedBox(height: 32),
 
               const Text(
@@ -860,43 +849,6 @@ class _AdminUploadDocumentScreenState extends State<AdminUploadDocumentScreen> {
               : items,
           onChanged: items.isEmpty ? null : onChanged,
         ),
-      ),
-    );
-  }
-
-  Widget _buildStatusRadio(bool value, String title, String subtitle) {
-    return InkWell(
-      onTap: () => setState(() => _isActive = value),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Radio<bool>(
-            value: value,
-            groupValue: _isActive,
-            activeColor: const Color(0xFF0F47B2),
-            onChanged: (val) => setState(() => _isActive = val!),
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          ),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                  color: Colors.black87,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                subtitle,
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
-              ),
-            ],
-          ),
-        ],
       ),
     );
   }

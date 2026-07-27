@@ -309,7 +309,7 @@ class _WorkerAlertsScreenState extends State<WorkerAlertsScreen> {
                                       shrinkWrap: true,
                                       padding: EdgeInsets.zero,
                                       itemCount: recent.length,
-                                      separatorBuilder: (_, __) => Divider(
+                                      separatorBuilder: (_, _) => Divider(
                                           height: 1, color: Colors.grey.shade100),
                                       itemBuilder: (_, i) => _RecentAlertRow(
                                         alert: recent[i],
@@ -404,7 +404,7 @@ class _WorkerAlertsScreenState extends State<WorkerAlertsScreen> {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         itemCount: _filterTypes.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        separatorBuilder: (_, _) => const SizedBox(width: 10),
         itemBuilder: (_, i) {
           final label = _filterTypes[i]['label']!;
           final value = _filterTypes[i]['value']!;

@@ -159,6 +159,11 @@ class User(AbstractUser, UUIDModel):
     def is_department_head(self) -> bool:
         return self.role == self.Role.DEPARTMENT_HEAD
 
+    can_manage_docs = models.BooleanField(
+        default=False, 
+        db_index=True,
+        help_text="If True, this worker can upload and manage documents pending Head approval."
+    )
 
 # ---------------------------------------------------------------------------
 # Tags & Documents (department-wise knowledge base)

@@ -12,6 +12,9 @@ import 'package:isl_app/views/worker/worker_chat_screen.dart';
 import 'package:isl_app/views/worker/worker_alerts_screen.dart';
 import 'package:isl_app/views/worker/worker_profile_screen.dart';
 import 'package:isl_app/core/services/api_service.dart';
+import 'package:provider/provider.dart';
+import 'package:isl_app/core/providers/app_state.dart';
+import 'package:isl_app/views/worker/worker_upload_document_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WORKER DOCUMENTS SCREEN
@@ -51,6 +54,16 @@ class _WorkerDocumentsScreenState extends State<WorkerDocumentsScreen> {
   void initState() {
     super.initState();
     _fetchDocuments();
+    // Make sure we know the signed-in worker's `canManageDocs` / role
+    // before build() decides whether to show the Upload button.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _ensureProfileLoaded());
+  }
+
+  Future<void> _ensureProfileLoaded() async {
+    final appState = context.read<AppState>();
+    if (appState.profile == null) {
+      await appState.loadProfile();
+    }
   }
 
   @override
@@ -279,9 +292,19 @@ class _WorkerDocumentsScreenState extends State<WorkerDocumentsScreen> {
     return docs.take(5).toList();
   }
 
+  // ── Upload access check ──────────────────────────────────────────────────
+  // Worker can upload only if the Head has granted `can_manage_docs`, or if
+  // the signed-in user is themself a DEPARTMENT_HEAD (inherent rights).
+  bool _canUpload(BuildContext context) {
+    final profile = context.watch<AppState>().profile;
+    if (profile == null) return false;
+    return profile.canManageDocs || profile.role.toUpperCase() == 'DEPARTMENT_HEAD';
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentDocs = _filteredDocs;
+    final canUpload = _canUpload(context);
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -332,13 +355,19 @@ class _WorkerDocumentsScreenState extends State<WorkerDocumentsScreen> {
                           // ── All Documents ────────────────────────────────────
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 16),
-                            child: Text(
-                              'All Documents (${currentDocs.length})',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF1E293B),
-                              ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'All Documents (${currentDocs.length})',
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF1E293B),
+                                  ),
+                                ),
+                                if (canUpload) _buildUploadButton(),
+                              ],
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -368,6 +397,29 @@ class _WorkerDocumentsScreenState extends State<WorkerDocumentsScreen> {
       bottomNavigationBar: WorkerBottomNav(
         activeIndex: 1,
         onTap: _handleNav,
+      ),
+    );
+  }
+
+  // ── Upload button (only rendered when canUpload is true) ───────────────────
+  Widget _buildUploadButton() {
+    return ElevatedButton.icon(
+      onPressed: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const WorkerUploadDocumentScreen(),
+          ),
+        ).then((_) => _fetchDocuments()); // refresh list after upload
+      },
+      icon: const Icon(Icons.upload_file, size: 16),
+      label: const Text('Upload'),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFF163E75),
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
     );
   }
@@ -477,7 +529,7 @@ class _WorkerDocumentsScreenState extends State<WorkerDocumentsScreen> {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         itemCount: _filters.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (_, i) {
           final label = _filters[i];
           final isActive = label == _activeFilter;
@@ -529,7 +581,7 @@ class _WorkerDocumentsScreenState extends State<WorkerDocumentsScreen> {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         itemCount: recentDocs.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 12),
+        separatorBuilder: (_, _) => const SizedBox(width: 12),
         itemBuilder: (_, i) => _RecentDocCard(
           doc: recentDocs[i],
           onView: () => _handleDocumentAction(recentDocs[i]['id'].toString(), 'view'),
@@ -545,7 +597,7 @@ class _WorkerDocumentsScreenState extends State<WorkerDocumentsScreen> {
       shrinkWrap: true,
       padding: const EdgeInsets.symmetric(horizontal: 16),
       itemCount: docs.length,
-      separatorBuilder: (_, __) => Divider(height: 1, thickness: 1, color: Colors.grey.shade100),
+      separatorBuilder: (_, _) => Divider(height: 1, thickness: 1, color: Colors.grey.shade100),
       itemBuilder: (_, i) => _AllDocRow(
         doc: docs[i],
         onView: () => _handleDocumentAction(docs[i]['id'].toString(), 'view'),

@@ -162,7 +162,7 @@ class AuthService {
     }
 
     final userData = userMap is Map
-        ? Map<String, dynamic>.from(userMap as Map)
+        ? Map<String, dynamic>.from(userMap)
         : responseData;
     await prefs.setString(_userDataKey, jsonEncode(userData));
   }

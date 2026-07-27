@@ -51,6 +51,9 @@ class ApiService {
   static const String quickHelp = '/api/help/';
   static const String auditLogs = '/api/audit-logs/'; 
   static const String settings = '/api/settings/';
+  
+  // NEW ENDPOINTS ADDED FOR DASHBOARD STATS
+  static const String syncStatus = '/api/system/sync-status/';
 
   // MEMORY CACHE (Fixes Web Race Conditions)
   String? _memoryToken;
@@ -93,6 +96,7 @@ class ApiService {
     await prefs.setString('name', session.fullName);
     await prefs.setString('department', session.department);
     await prefs.setString('shift', session.shift);
+    await prefs.setBool('can_manage_docs', session.canManageDocs);
   }
 
   Future<void> clearSession() async {
@@ -118,6 +122,7 @@ class ApiService {
       fullName: prefs.getString('name') ?? '',
       department: prefs.getString('department') ?? '',
       shift: prefs.getString('shift') ?? '',
+      canManageDocs: prefs.getBool('can_manage_docs') ?? false,
     );
   }
 
@@ -160,7 +165,7 @@ class ApiService {
       chatHistory,
       query: {
         if (limit != null) 'limit': limit.toString(),
-        if (sessionId != null) 'session_id': sessionId,
+        'session_id': ?sessionId,
       },
     );
     final data = response['data'] as Map<String, dynamic>? ?? {};
@@ -382,8 +387,22 @@ class ApiService {
     return DocumentItem.fromJson(data);
   }
 
+  Future<void> toggleUploadAccess(String userId, bool canManage) async {
+    await _patch(
+      '$users$userId/toggle_upload_access/',
+      body: {'can_manage_docs': canManage},
+    );
+  }
+
   Future<DocumentItem> approveDocument(String id) async {
-    final response = await _patch('$documents$id/approve/', body: {});
+    final response = await _post('$documents$id/approve/', body: {});
+    final data = response['data'] as Map<String, dynamic>? ?? {};
+    return DocumentItem.fromJson(data);
+  }
+
+  // --- NAYA FUNCTION: Reject Document ---
+  Future<DocumentItem> rejectDocument(String id) async {
+    final response = await _post('$documents$id/reject/', body: {});
     final data = response['data'] as Map<String, dynamic>? ?? {};
     return DocumentItem.fromJson(data);
   }
@@ -445,6 +464,24 @@ class ApiService {
 
     final response = await _get(auditLogs, query: query);
     return response['data'] as Map<String, dynamic>;
+  }
+  
+  // NEW METHOD: Fetch complete grouped stats for the dashboard without relying on page 1 extrapolation
+  Future<List<dynamic>> fetchAuditLogStats() async {
+    final response = await _get('${auditLogs}stats/');
+    final data = response['data'];
+    if (data is List) {
+      return data;
+    } else if (data is Map && data.containsKey('results')) {
+      return data['results'] as List<dynamic>;
+    }
+    return [];
+  }
+  
+  // NEW METHOD: Fetch real-time AI knowledge base sync status
+  Future<Map<String, dynamic>> fetchSyncStatus() async {
+    final response = await _get(syncStatus);
+    return response['data'] as Map<String, dynamic>? ?? {};
   }
 
   Future<List<dynamic>> fetchDistinctActivityValues({

@@ -10,7 +10,7 @@ from .views import (
 from .views import ChatAskView, ChatHistoryView, LeaveApplicationView
 from .views import ChatNewSessionView, ChatSessionListView
 
-from .views import ChatNewSessionView, ChatSessionListView, ChatSessionDetailView 
+from .views import ChatNewSessionView, ChatSessionListView, ChatSessionDetailView, SystemSyncStatusView
 
 
 router = DefaultRouter()
@@ -32,9 +32,9 @@ urlpatterns = [
     path('auth/microsoft/', MicrosoftLoginView.as_view(), name='microsoft_login'),
     path('settings/', SystemSettingsView.as_view(), name='system-settings'),
     path('', include(router.urls)),
+    path('system/sync-status/',SystemSyncStatusView.as_view(), name='sync_status'),
     path('chat/ask/', ChatAskView.as_view(), name='chat_ask'),
     path('chat/history/', ChatHistoryView.as_view(), name='chat_history'),
-    # NEW: sidebar "New chat" button + "Recent" chats list.
     path('chat/session/new/', ChatNewSessionView.as_view(), name='chat_new_session'),
     path('chat/sessions/', ChatSessionListView.as_view(), name='chat_sessions'),
     path('chat/sessions/<str:session_id>/', ChatSessionDetailView.as_view(), name='chat_session_detail'),

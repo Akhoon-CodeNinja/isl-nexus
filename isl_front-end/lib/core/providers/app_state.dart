@@ -19,6 +19,9 @@ class AppState extends ChangeNotifier {
 
   AuthSession? get session => _session;
   UserProfile? get profile => _profile;
+  // Logged-in user's own department id — used to restrict the Head's
+  // "Pending Approval" tab to their own department only.
+  String? get departmentId => _profile?.departmentId ?? _session?.departmentId;
   bool get loading => _loading;
   String? get error => _error;
   List<DocumentItem> get documents => _documents;
@@ -148,6 +151,7 @@ class AppState extends ChangeNotifier {
                     isActive: updated.isActive,
                     status: updated.status,
                     url: d.url,
+                    approvalStatus: updated.approvalStatus,
                     isSelected: d.isSelected,
                   )
                 : d,
@@ -179,6 +183,40 @@ class AppState extends ChangeNotifier {
                     isActive: updated.isActive,
                     status: updated.status,
                     url: d.url,
+                    approvalStatus: updated.approvalStatus,
+                    isSelected: d.isSelected,
+                  )
+                : d,
+          )
+          .toList();
+      _error = null;
+    } catch (e) {
+      _error = e.toString();
+    }
+    notifyListeners();
+  }
+
+  // --- NAYA FUNCTION: Reject Document Handle Karega ---
+  Future<void> rejectDocument(String id) async {
+    try {
+      final updated = await _apiService.rejectDocument(id);
+      _documents = _documents
+          .map(
+            (d) => d.id == id
+                ? DocumentItem(
+                    id: d.id,
+                    title: d.title,
+                    documentNumber: d.documentNumber,
+                    type: d.type,
+                    department: d.department,
+                    version: d.version,
+                    updatedAt: updated.updatedAt,
+                    uploadedByName: d.uploadedByName,
+                    uploadedByInitials: d.uploadedByInitials,
+                    isActive: updated.isActive,
+                    status: updated.status,
+                    url: d.url,
+                    approvalStatus: updated.approvalStatus,
                     isSelected: d.isSelected,
                   )
                 : d,

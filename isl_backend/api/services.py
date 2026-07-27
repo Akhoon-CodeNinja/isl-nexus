@@ -1,4 +1,5 @@
 import os
+import datetime
 import re
 from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -33,18 +34,27 @@ class ISLChatBotService:
         if os.path.exists(self.vector_store_path):
             self.vector_store = FAISS.load_local(self.vector_store_path, self.embeddings, allow_dangerous_deserialization=True)
 
-    # Har prompt ke sath yeh common language rule attach hota hai, taake model
-    # kabhi Hindi (Devanagari) ya plain English mein jawab na de. Ye rule
-    # sirf general nahi -- kuch commonly-leaking Hindi words explicitly
-    # ban kiye gaye hain, kyunke model general instruction ke bawajood
-    # kabhi kabhi "kripya" jaisay Hindi-origin lafz istemal kar leta tha.
+    # Har prompt ke sath yeh common language rule attach hota hai. Rule ab
+    # user ki apni query ki language MIRROR karta hai (English sawal ->
+    # English jawab, Urdu/Roman Urdu sawal -> Roman Urdu jawab) -- sirf
+    # Hindi/Devanagari har surat mein banned hai, chahe jawab English ho
+    # ya Urdu. Pehle ye rule hamesha Urdu force karta tha chahe user ne
+    # English mein poocha ho, jo galat tha.
     _LANGUAGE_RULE = (
-        "STRICT LANGUAGE RULE: You must respond ONLY in Roman Urdu (Urdu language "
-        "written in Latin/English script) or in Urdu script. NEVER respond in Hindi "
-        "or Devanagari script, and never respond in plain English. This rule has no "
-        "exceptions, even if the user writes in English or Hindi.\n"
-        "In particular, NEVER use these Hindi-origin words -- always use the Urdu "
-        "word given instead:\n"
+        "STRICT LANGUAGE RULE: Detect the language of the user's message and reply in "
+        "THAT SAME language:\n"
+        "- If the user's message is written in English, respond ONLY in English.\n"
+        "- If the user's message is written in Urdu -- whether in Roman Urdu (Urdu "
+        "written in Latin/English script) or in Urdu script -- respond ONLY in Roman "
+        "Urdu (Urdu written in Latin/English script).\n"
+        "Do not mix languages within a single reply, and do not default to Urdu just "
+        "because that is your usual style -- match the user's message.\n\n"
+        "HOWEVER, one exception applies regardless of the above: NEVER respond in Hindi "
+        "or Devanagari script under any circumstance, even if the user's message itself "
+        "is in Hindi or Devanagari -- treat Hindi input the same as Urdu input and reply "
+        "in Roman Urdu instead.\n"
+        "In particular, when replying in Roman Urdu, NEVER use these Hindi-origin words "
+        "-- always use the Urdu word given instead:\n"
         "- 'kripya' -> use 'baraye meherbani' or 'baraye karam'\n"
         "- 'dhanyawad' -> use 'shukriya'\n"
         "- 'aap ka swagat hai' -> use 'khushamdeed' or 'jee aya nu'\n"
@@ -121,15 +131,48 @@ class ISLChatBotService:
         self.vector_store = FAISS.from_documents(chunks, self.embeddings)
         self.vector_store.save_local(self.vector_store_path)
 
+        try:
+            timestamp_file = os.path.join(self.vector_store_path, "sync_timestamp.txt")
+            with open(timestamp_file, "w") as f:
+                f.write(datetime.datetime.now().isoformat())
+        except Exception as e:
+            print(f"[ISLChatBotService] Warning: could not save sync timestamp: {e}")
+
+
     def _semantic_router(self, query: str) -> str:
         """Query ka intent samajhta hai: LEAVE_REQUEST, COMPANY, GREETING ya OFF_TOPIC"""
         router_prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a strict classification AI for Industrial Solutions Ltd (ISL).
             Categorize the query into EXACTLY ONE of these categories:
-            - 'LEAVE_REQUEST': If the user wants to apply for, request, or ask about taking leave/chutti/off from work — in any wording (e.g. "leave chahiye", "mujhe chutti chahiye", "leave apply karni hai", "I want to apply for sick leave", "kal chutti karni hai"). This takes priority over COMPANY.
-            - 'COMPANY': If it could plausibly relate to ISL's workplace in any way — company documents, policies, workers, departments, safety, HR, equipment, machines, facilities, procedures, manuals, or any specific ISL guideline. This includes questions about specific equipment/machines/systems (e.g. vending machines, boilers, safety gear) even if "ISL" or "company" is not explicitly mentioned, since these are commonly covered in internal manuals.
+            - 'LEAVE_REQUEST': ONLY if the user is expressing an intent to actually APPLY FOR or
+              TAKE leave/chutti/off right now for themselves (e.g. "leave chahiye", "mujhe chutti
+              chahiye", "leave apply karni hai", "I want to apply for sick leave", "kal chutti karni
+              hai", "mujhe parson off chahiye"). This takes priority over COMPANY, but ONLY for this
+              narrow "wants to take leave now" case.
+            - 'COMPANY': If it could plausibly relate to ISL's workplace in any way — company documents,
+              policies, workers, departments, safety, HR, equipment, machines, facilities, procedures,
+              manuals, or any specific ISL guideline. This includes questions about specific
+              equipment/machines/systems (e.g. vending machines, boilers, safety gear) even if "ISL" or
+              "company" is not explicitly mentioned, since these are commonly covered in internal manuals.
+              IMPORTANT: this also includes any INFORMATIONAL question ABOUT the leave policy itself —
+              e.g. "how many days of leave am I entitled to", "what is the sick leave policy", "leave
+              apply karne ka process kya hai", "kitni leave milti hai", "what happens if I resign", "how
+              much notice period is required". These are requests for INFORMATION, not a request to take
+              leave, so they are COMPANY, never LEAVE_REQUEST — even though the word "leave" appears.
             - 'GREETING': If it is only a greeting or small talk directed at the assistant (hi, hello, salam, thank you, how are you, aap kon hain).
             - 'OFF_TOPIC': Only for topics that clearly cannot relate to a workplace at all — general knowledge trivia, other companies, coding help, entertainment, personal advice, celebrities, politics, etc.
+
+            DISAMBIGUATION RULE: Ask yourself "Is the user asking me to DO something (submit/start a
+            leave application for them right now), or are they asking a QUESTION about policy/facts?"
+            Only the former is LEAVE_REQUEST. A question containing the word "leave", "chutti", or a
+            number of days is still just COMPANY if it is asking for information rather than requesting
+            an action.
+
+            ALSO NOTE: the word "leave" has other everyday meanings unrelated to time-off from work
+            (e.g. "leave a message", "leave a review", "don't leave without saying bye", "leave the
+            building"). These are NOT leave-of-absence requests at all — classify them as COMPANY or
+            OFF_TOPIC based on their actual subject, never LEAVE_REQUEST, just because the word "leave"
+            appears.
 
             IMPORTANT: If you are unsure whether a query is COMPANY or OFF_TOPIC, always choose COMPANY. It is far worse to wrongly refuse a legitimate workplace question than to search the documents and find nothing.
 
@@ -147,9 +190,30 @@ class ISLChatBotService:
             return "GREETING"
         return "OFF_TOPIC"
 
+    # Best-effort, non-LLM language guess -- used ONLY for the one hardcoded
+    # fallback string below (vector store empty), since that path returns
+    # before ever calling the LLM and so can't rely on the model's own
+    # language-matching. Not meant to be perfect; common English function
+    # words vs. common Roman Urdu words is enough to catch the obvious case.
+    _ENGLISH_HINT_WORDS = {
+        "the", "is", "are", "what", "where", "when", "how", "please",
+        "can", "could", "would", "should", "do", "does", "did", "i", "you",
+    }
+
+    @classmethod
+    def _looks_like_english(cls, query: str) -> bool:
+        words = re.findall(r"[a-zA-Z']+", query.lower())
+        if not words:
+            return False
+        hits = sum(1 for w in words if w in cls._ENGLISH_HINT_WORDS)
+        return hits / len(words) >= 0.3
+
     def _handle_company_query(self, query: str) -> str:
         """FAISS se data nikal kar RAG ke zariye jawab deta hai"""
         if not self.vector_store:
+            if self._looks_like_english(query):
+                return ("Sorry, the company knowledge base is currently empty or being "
+                         "updated. Please contact the admin.")
             return "Mazrat chahta hoon, company ka knowledge base is waqt khali hai ya update ho raha hai. Baraye meherbani admin se raabta karein."
 
         # SOLUTION: MMR (Maximal Marginal Relevance) search use karein
@@ -166,9 +230,10 @@ class ISLChatBotService:
         rag_prompt = ChatPromptTemplate.from_messages([
             ("system", f"""You are the ISL Assistant for Industrial Solutions Ltd (ISL).
             Answer the question using ONLY the provided context below.
-            If the answer is not present in the context, politely say (in Roman Urdu) that
-            you do not have specific information on this and the user should contact the
-            relevant department or admin.
+            If the answer is not present in the context, politely say (matching the
+            user's language per the rule below) that you do not have specific
+            information on this and the user should contact the relevant department
+            or admin.
 
             {self._LANGUAGE_RULE}
 

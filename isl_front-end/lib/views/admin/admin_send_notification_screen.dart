@@ -157,7 +157,7 @@ class _AdminSendNotificationScreenState extends State<AdminSendNotificationScree
                                       child: CircularProgressIndicator(),
                                     )
                                   : DropdownButtonFormField<String?>(
-                                      value: _selectedDepartmentId,
+                                      initialValue: _selectedDepartmentId,
                                       decoration: _inputDecoration(),
                                       items: [
                                         const DropdownMenuItem(
@@ -179,7 +179,7 @@ class _AdminSendNotificationScreenState extends State<AdminSendNotificationScree
                               // Alert Type Dropdown (Updated based on models.py)
                               _buildLabel('Alert Type'),
                               DropdownButtonFormField<String>(
-                                value: _selectedType,
+                                initialValue: _selectedType,
                                 decoration: _inputDecoration(),
                                 items: const [
                                   DropdownMenuItem(value: 'ANNOUNCEMENT', child: Text('Announcement')),

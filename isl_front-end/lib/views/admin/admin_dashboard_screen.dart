@@ -41,6 +41,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   int _totalActivities = 0, _docActivities = 0, _userActivities = 0, _systemActivities = 0;
   bool _isLoadingStats = true;
 
+  // Real Data Variables for AI Sync Status
+  String _syncStatus = "Checking...";
+  String _lastSyncTime = "Unknown";
+
   // Color palette for the bar chart
   static const List<Color> _colorCycle = [
     Color(0xFF2563EB),
@@ -118,29 +122,40 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       }).length;
       int dHeads = users.where((u) => (u['role'] ?? '').toString() == 'DEPARTMENT_HEAD').length;
 
-      // 4. Activity Logs Stats Fetching
-      final activityRaw = await _apiService.fetchActivityLogsRaw(page: 1);
-      int tActivities = 0;
-      List<dynamic> actResults = [];
-      
-      // Handle paginated responses by checking keys directly, as activityRaw is a Map
-      if (activityRaw.containsKey('count')) {
-        tActivities = int.tryParse(activityRaw['count'].toString()) ?? 0;
-      }
-      
-      if (activityRaw.containsKey('results') && activityRaw['results'] is List) {
-        actResults = activityRaw['results'] as List<dynamic>;
-      } else if (activityRaw.containsKey('data') && activityRaw['data'] is List) {
-        actResults = activityRaw['data'] as List<dynamic>;
+      // 4. Activity Logs Stats Fetching (Using new aggregated stats endpoint)
+      int tActivities = 0, tempDocs = 0, tempUsers = 0, tempSystem = 0;
+      try {
+        final statsData = await _apiService.fetchAuditLogStats(); 
+        for (var stat in statsData) {
+          String mod = (stat['entity_type'] ?? '').toString().toLowerCase();
+          int count = stat['count'] ?? 0;
+          tActivities += count;
+          
+          if (mod.contains('document')) {
+            tempDocs += count;
+          } else if (mod.contains('user') || mod.contains('auth')) tempUsers += count;
+          else tempSystem += count;
+        }
+      } catch (e) {
+        debugPrint("Error fetching audit log stats: $e");
       }
 
-      // First Page Breakdown Extrapolation
-      int tempDocs = 0, tempUsers = 0, tempSystem = 0;
-      for (var item in actResults) {
-        String mod = (item['entity_type'] ?? item['module'] ?? '').toString().toLowerCase();
-        if (mod.contains('document')) tempDocs++;
-        else if (mod.contains('user') || mod.contains('auth')) tempUsers++;
-        else tempSystem++;
+      // 5. System Sync Status Fetching (Using new sync-status endpoint)
+      String fetchedSyncStatus = "Error";
+      String fetchedLastSyncTime = "Unknown";
+      try {
+        final syncData = await _apiService.fetchSyncStatus(); 
+        fetchedSyncStatus = syncData['status'] ?? 'Pending';
+        
+        // Format the ISO time slightly if available
+        String rawTime = syncData['last_sync']?.toString() ?? 'Unknown';
+        if (rawTime != 'Unknown' && rawTime.length >= 16) {
+          fetchedLastSyncTime = rawTime.substring(0, 16).replaceAll('T', ' ');
+        } else {
+          fetchedLastSyncTime = rawTime;
+        }
+      } catch (e) {
+        debugPrint("Error fetching sync status: $e");
       }
 
       if (mounted) {
@@ -164,6 +179,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           _docActivities = tempDocs;
           _userActivities = tempUsers;
           _systemActivities = tempSystem;
+
+          _syncStatus = fetchedSyncStatus;
+          _lastSyncTime = fetchedLastSyncTime;
         });
       }
     } catch (e) {
@@ -228,56 +246,79 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     padding: const EdgeInsets.only(left: 32, bottom: 32, right: 32, top: 8),
                     child: Column(
                       children: [
-                        // --- MAIN GRID (3 columns) ---
-                        IntrinsicHeight(
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Expanded(
-                                child: Column(
+                        // --- MAIN GRID (Responsive Layout Builder) ---
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            if (constraints.maxWidth < 900) {
+                              // NARROW SCREEN (Stack vertically)
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  _buildAnimatedCard(index: 0, child: _buildUploadsOverview(), onTap: () => _navigateTo(const AdminDocumentsScreen())),
+                                  const SizedBox(height: 24),
+                                  _buildAnimatedCard(index: 1, child: _buildAIKnowledgeBase(), onTap: () => _navigateTo(const AdminDocumentsScreen())),
+                                  const SizedBox(height: 24),
+                                  _buildAnimatedCard(index: 2, child: _buildDepartmentOverview(), onTap: () => _navigateTo(const AdminDepartmentsScreen())),
+                                  const SizedBox(height: 24),
+                                  _buildAnimatedCard(index: 3, child: _buildActivityOverview(), onTap: () => _navigateTo(const AdminActivityLogScreen())),
+                                  const SizedBox(height: 24),
+                                  _buildAnimatedCard(index: 4, child: _buildUserOverview(), onTap: () => _navigateTo(const AdminUsersScreen())),
+                                ],
+                              );
+                            } else {
+                              // WIDE SCREEN (3-Column Layout)
+                              return IntrinsicHeight(
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
                                   children: [
-                                    _buildAnimatedCard(
-                                      index: 0,
-                                      child: _buildUploadsOverview(),
-                                      onTap: () => _navigateTo(const AdminDocumentsScreen()),
+                                    Expanded(
+                                      child: Column(
+                                        children: [
+                                          _buildAnimatedCard(
+                                            index: 0,
+                                            child: _buildUploadsOverview(),
+                                            onTap: () => _navigateTo(const AdminDocumentsScreen()),
+                                          ),
+                                          const SizedBox(height: 24),
+                                          _buildAnimatedCard(
+                                            index: 3,
+                                            child: _buildActivityOverview(),
+                                            onTap: () => _navigateTo(const AdminActivityLogScreen()),
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                    const SizedBox(height: 24),
-                                    _buildAnimatedCard(
-                                      index: 3,
-                                      child: _buildActivityOverview(),
-                                      onTap: () => _navigateTo(const AdminActivityLogScreen()),
+                                    const SizedBox(width: 24),
+                                    Expanded(
+                                      child: Column(
+                                        children: [
+                                          _buildAnimatedCard(
+                                            index: 1,
+                                            child: _buildAIKnowledgeBase(),
+                                            onTap: () => _navigateTo(const AdminDocumentsScreen()),
+                                          ),
+                                          const SizedBox(height: 24),
+                                          _buildAnimatedCard(
+                                            index: 4,
+                                            child: _buildUserOverview(),
+                                            onTap: () => _navigateTo(const AdminUsersScreen()),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 24),
+                                    Expanded(
+                                      child: _buildAnimatedCard(
+                                        index: 2,
+                                        child: _buildDepartmentOverview(),
+                                        onTap: () => _navigateTo(const AdminDepartmentsScreen()),
+                                      ),
                                     ),
                                   ],
                                 ),
-                              ),
-                              const SizedBox(width: 24),
-                              Expanded(
-                                child: Column(
-                                  children: [
-                                    _buildAnimatedCard(
-                                      index: 1,
-                                      child: _buildAIKnowledgeBase(),
-                                      onTap: () => _navigateTo(const AdminDocumentsScreen()),
-                                    ),
-                                    const SizedBox(height: 24),
-                                    _buildAnimatedCard(
-                                      index: 4,
-                                      child: _buildUserOverview(),
-                                      onTap: () => _navigateTo(const AdminUsersScreen()),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 24),
-                              Expanded(
-                                child: _buildAnimatedCard(
-                                  index: 2,
-                                  child: _buildDepartmentOverview(),
-                                  onTap: () => _navigateTo(const AdminDepartmentsScreen()),
-                                ),
-                              ),
-                            ],
-                          ),
+                              );
+                            }
+                          },
                         ),
                         
                         const SizedBox(height: 24),
@@ -577,9 +618,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         const SizedBox(height: 6),
         Row(
           children: [
-            const _PulsingDot(color: Colors.green, size: 10),
+            _PulsingDot(color: _syncStatus == "Synced" ? Colors.green : Colors.orange, size: 10),
             const SizedBox(width: 8),
-            const Text("Synced", style: TextStyle(fontSize: 13, color: Colors.black87, fontWeight: FontWeight.w500)),
+            Text(_syncStatus, style: const TextStyle(fontSize: 13, color: Colors.black87, fontWeight: FontWeight.w500)),
           ],
         ),
         const SizedBox(height: 16),
@@ -591,11 +632,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         const SizedBox(height: 16),
         const Text("Last Sync", style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold)),
         const SizedBox(height: 6),
-        const Row(
+        Row(
           children: [
-            Icon(Icons.access_time, size: 14, color: Colors.black54),
-            SizedBox(width: 8),
-            Text("Just now", style: TextStyle(fontSize: 12, color: Colors.black87)),
+            const Icon(Icons.access_time, size: 14, color: Colors.black54),
+            const SizedBox(width: 8),
+            Text(_lastSyncTime, style: const TextStyle(fontSize: 12, color: Colors.black87)),
           ],
         ),
       ],
@@ -647,11 +688,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         const SizedBox(height: 16),
         _buildBoxStat(_totalActivities.toString(), "Total Activities", Icons.description_outlined, Colors.blue),
         const SizedBox(height: 12),
-        _buildBoxStat(_docActivities.toString(), "Document Activities (Page)", Icons.insert_drive_file_outlined, Colors.green),
+        _buildBoxStat(_docActivities.toString(), "Document Activities", Icons.insert_drive_file_outlined, Colors.green),
         const SizedBox(height: 12),
-        _buildBoxStat(_userActivities.toString(), "User Activities (Page)", Icons.people_outline, Colors.orange),
+        _buildBoxStat(_userActivities.toString(), "User Activities", Icons.people_outline, Colors.orange),
         const SizedBox(height: 12),
-        _buildBoxStat(_systemActivities.toString(), "System Activities (Page)", Icons.security_outlined, Colors.purple), 
+        _buildBoxStat(_systemActivities.toString(), "System Activities", Icons.security_outlined, Colors.purple), 
       ],
     );
   }
@@ -738,7 +779,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+        Expanded(
+          child: Text(
+            label, 
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: 8),
         _isLoadingStats 
             ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2))
             : _CountUpText(count, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: countColor)),
@@ -829,7 +877,7 @@ class _CountUpText extends StatelessWidget {
   const _CountUpText(
     this.value, {
     required this.style,
-    this.duration = const Duration(milliseconds: 900),
+    this.duration = const Duration(milliseconds: 800),
   });
 
   final String value;

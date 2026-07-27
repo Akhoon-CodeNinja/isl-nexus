@@ -457,7 +457,7 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
                   const Text("Leave Type", style: TextStyle(fontSize: 12.5, color: Colors.grey)),
                   const SizedBox(height: 6),
                   DropdownButtonFormField<String>(
-                    value: selectedType,
+                    initialValue: selectedType,
                     decoration: InputDecoration(
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -678,7 +678,7 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 16),
               itemCount: _quickHelpDocs.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
               itemBuilder: (_, i) {
                 final doc = _quickHelpDocs[i];
                 final title = doc['title']?.toString() ?? 'Document';
