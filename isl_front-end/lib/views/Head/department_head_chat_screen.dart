@@ -5,10 +5,10 @@ import 'package:provider/provider.dart';
 import 'package:isl_app/core/providers/app_state.dart';
 import 'package:isl_app/core/services/api_service.dart';
 import 'package:isl_app/views/auth/login_screen.dart';
-import 'package:isl_app/widgets/Admin/admin_chat_drawer.dart';
-import 'package:isl_app/widgets/Admin/admin_sidebar.dart';
-import 'package:isl_app/widgets/Admin/admin_top_header.dart';
-import 'package:isl_app/views/Admin/admin_chat_history_screen.dart';
+import 'package:isl_app/widgets/Head/department_head_chat_drawer.dart';
+import 'package:isl_app/widgets/Head/department_head_sidebar.dart';
+import 'package:isl_app/widgets/Head/department_head_top_header.dart';
+import 'package:isl_app/views/Head/department_head_chat_history_screen.dart';
 import 'package:isl_app/widgets/worker/worker_ai_mascot.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -29,24 +29,24 @@ import 'package:isl_app/widgets/worker/worker_ai_mascot.dart';
 //     -- each bubble/indicator just shows the state that matches its own
 //     context. Wire up a shared MascotState if you want the fuller reactive
 //     behaviour later.
-//   - Recent chats: AdminChatDrawer (adapted from worker_chat_drawer.dart)
+//   - Recent chats: DepartmentHeadChatDrawer (adapted from worker_chat_drawer.dart)
 //     opens as an endDrawer via the header's "Recent chats" icon button.
 //     New chat / search / delete-one / clear-all all work the same as the
-//     worker version. Tapping a past session pushes AdminChatHistoryScreen
+//     worker version. Tapping a past session pushes DepartmentHeadChatHistoryScreen
 //     (read-only) instead of loading it into this live screen, same
 //     behaviour as worker_shared_drawer.dart's onOpenSession.
 //   - No "Quick Help" department-documents chips (worker screen fetches
 //     these via a hardcoded http://127.0.0.1:8000 URL, which wouldn't work
 //     in production anyway -- worth fixing there too, separately).
 // ─────────────────────────────────────────────────────────────────────────────
-class AdminChatScreen extends StatefulWidget {
-  const AdminChatScreen({super.key});
+class DepartmentHeadChatScreen extends StatefulWidget {
+  const DepartmentHeadChatScreen({super.key});
 
   @override
-  State<AdminChatScreen> createState() => _AdminChatScreenState();
+  State<DepartmentHeadChatScreen> createState() => _DepartmentHeadChatScreenState();
 }
 
-class _AdminChatScreenState extends State<AdminChatScreen> {
+class _DepartmentHeadChatScreenState extends State<DepartmentHeadChatScreen> {
   static const Color _darkBlue = Color(0xFF0F294D);
   static const Color _accentBlue = Color(0xFF163E75);
   static const Color _bgLight = Color(0xFFF8FAFC);
@@ -401,7 +401,7 @@ class _AdminChatScreenState extends State<AdminChatScreen> {
     }
   }
 
-  // ── AdminChatDrawer callbacks ───────────────────────────────────────
+  // ── DepartmentHeadChatDrawer callbacks ───────────────────────────────────────
   // "New chat" tapped from the drawer while already on this live screen:
   // start a fresh session directly and reset what's shown, instead of
   // navigating away and back (there's nowhere else to navigate to -- this
@@ -424,12 +424,12 @@ class _AdminChatScreenState extends State<AdminChatScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => AdminChatHistoryScreen(sessionId: sessionId, title: preview),
+        builder: (_) => DepartmentHeadChatHistoryScreen(sessionId: sessionId, title: preview),
       ),
     );
   }
 
-  // Same logout sequence as AdminSidebar._signOut: sign out via AppState,
+  // Same logout sequence as DepartmentHeadSidebar._signOut: sign out via AppState,
   // then replace the whole nav stack with LoginScreen so there's no way
   // back via the system back button.
   Future<void> _logoutFromDrawer() async {
@@ -459,7 +459,7 @@ class _AdminChatScreenState extends State<AdminChatScreen> {
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: _bgLight,
-      endDrawer: AdminChatDrawer(
+      endDrawer: DepartmentHeadChatDrawer(
         currentSessionId: _currentSessionId,
         onNewChat: _startNewChatFromDrawer,
         onOpenSession: _openSessionFromDrawer,
@@ -467,11 +467,11 @@ class _AdminChatScreenState extends State<AdminChatScreen> {
       ),
       body: Row(
         children: [
-          const AdminSidebar(activeItem: "AI Assistant"),
+          const DepartmentHeadSidebar(activeItem: "AI Assistant"),
           Expanded(
             child: Column(
               children: [
-                const AdminTopHeader(
+                const DepartmentHeadTopHeader(
                   title: "AI Assistant",
                   subtitle: "Ask about ISL policies, documents, or apply for leave.",
                 ),

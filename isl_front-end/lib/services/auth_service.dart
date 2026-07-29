@@ -49,6 +49,8 @@ class AuthService {
     );
   }
 
+  
+
   String _extractError(DioException e) {
     final data = e.response?.data;
     if (data is Map) {
@@ -181,6 +183,11 @@ class AuthService {
   bool isAdminRole(String? role) {
     final normalized = role?.trim().toUpperCase();
     return normalized == 'ADMIN' || normalized == 'DEPARTMENT_HEAD';
+  }
+
+  bool isDepartmentHeadRole(String? role) {
+    final normalized = role?.trim().toUpperCase();
+    return normalized == 'DEPARTMENT_HEAD';
   }
 
   Future<void> clearSession() async {

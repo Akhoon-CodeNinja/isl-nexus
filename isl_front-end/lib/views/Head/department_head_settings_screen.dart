@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:isl_app/core/services/api_service.dart';
-import 'package:isl_app/widgets/Admin/admin_sidebar.dart';
-import 'package:isl_app/widgets/Admin/admin_top_header.dart';
+import 'package:isl_app/widgets/Head/department_head_sidebar.dart';
+import 'package:isl_app/widgets/Head/department_head_top_header.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ADMIN SETTINGS SCREEN
@@ -25,14 +25,14 @@ import 'package:isl_app/widgets/Admin/admin_top_header.dart';
 // Visual pass only (Jul 2026): grouped sections, icon-tagged rows, and
 // a dirty-state save bar. No new fields, no API shape changes.
 // ─────────────────────────────────────────────────────────────────────────────
-class AdminSettingsScreen extends StatefulWidget {
-  const AdminSettingsScreen({super.key});
+class DepartmentHeadSettingsScreen extends StatefulWidget {
+  const DepartmentHeadSettingsScreen({super.key});
 
   @override
-  State<AdminSettingsScreen> createState() => _AdminSettingsScreenState();
+  State<DepartmentHeadSettingsScreen> createState() => _DepartmentHeadSettingsScreenState();
 }
 
-class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
+class _DepartmentHeadSettingsScreenState extends State<DepartmentHeadSettingsScreen> {
   // ── Design tokens ────────────────────────────────────────────────────────
   static const Color _navy = Color(0xFF163E75);
   static const Color _navyDark = Color(0xFF0F2C56);
@@ -84,7 +84,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
   }
 
   Future<void> _checkRole() async {
-    // AdminTopHeader reads the role from the 'user_data' JSON blob saved
+    // DepartmentHeadTopHeader reads the role from the 'user_data' JSON blob saved
     // by AuthService.storeUserSession() — and it works correctly. The
     // plain 'role' / 'user_role' keys and the /api/auth/me/ endpoint
     // both proved unreliable, so this mirrors the one source that's
@@ -105,10 +105,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     }
     debugPrint('SETTINGS SCREEN — resolved role from user_data: "$role"');
     if (mounted) {
-      setState(() {
-        final normalizedRole = role.trim().toUpperCase();
-        _canEdit = normalizedRole == 'DEPARTMENT_HEAD' || normalizedRole == 'ADMIN';
-      });
+      setState(() => _canEdit = role.trim().toUpperCase() == 'DEPARTMENT_HEAD');
     }
   }
 
@@ -221,11 +218,11 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
       body: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const AdminSidebar(activeItem: 'Settings'),
+          const DepartmentHeadSidebar(activeItem: 'Settings'),
           Expanded(
             child: Column(
               children: [
-                const AdminTopHeader(
+                const DepartmentHeadTopHeader(
                   title: 'Settings',
                   subtitle:
                       'Manage system settings, preferences and configurations.',
@@ -387,8 +384,8 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                   const SizedBox(width: 8),
                   const Expanded(
                     child: Text(
-                      'Read-only: only a Department Head or Admin can change '
-                      'these settings.',
+                      'Read-only: only a Department Head can change these '
+                      'settings.',
                       style: TextStyle(
                         fontSize: 12,
                         color: Color(0xFF92400E),

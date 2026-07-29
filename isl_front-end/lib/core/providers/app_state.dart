@@ -30,7 +30,7 @@ class AppState extends ChangeNotifier {
 
   /// Rebuilds `_session` from the persisted login token if it's currently
   /// null — e.g. right after a Flutter Web page refresh, or whenever a
-  /// widget (like AdminTopHeader) is built fresh and finds no in-memory
+  /// widget (like DepartmentHeadTopHeader) is built fresh and finds no in-memory
   /// session yet. Safe to call from many widgets: after the first attempt
   /// (successful or not) it's a no-op, so it never spams SharedPreferences
   /// reads or fights with an active sign-in.

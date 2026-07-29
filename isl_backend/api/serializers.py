@@ -1,7 +1,7 @@
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Department, Tag, Document, Alert, ChatSession, ChatMessage, AuditLog, SystemSettings
+from .models import Department, Tag, Document, Alert, ChatSession, ChatMessage, AuditLog, SystemSettings, NotificationTemplate
 
 User = get_user_model()
 
@@ -83,7 +83,7 @@ class UserListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'employee_id', 'full_name', 'email', 'role',
             'department_details', 'is_active', 'last_login', 'date_joined',
-            'shift_timing', 'can_manage_docs'
+            'shift_timing', 'can_manage_docs', 'chat_daily_limit_override'
         ]
 
 class MeSerializer(serializers.ModelSerializer):
@@ -94,11 +94,12 @@ class MeSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'employee_id', 'full_name', 'email', 'role',
             'department_details', 'is_active', 'last_login', 'date_joined',
-            'shift_timing','can_manage_docs'
+            'shift_timing','can_manage_docs', 'chat_daily_limit_override'
         ]
         read_only_fields = [
             'id', 'employee_id', 'role', 'department_details',
             'is_active', 'last_login', 'date_joined', 'shift_timing',
+            'chat_daily_limit_override',
         ]
 
 class TagSerializer(serializers.ModelSerializer):
@@ -200,6 +201,19 @@ class AuditLogSerializer(serializers.ModelSerializer):
             return "System Settings"
 
         return f"{obj.entity_type} (deleted) — {str(obj.entity_id)[:8]}..."
+
+class NotificationTemplateSerializer(serializers.ModelSerializer):
+    created_by_details = UserMinimalSerializer(source='created_by', read_only=True)
+
+    class Meta:
+        model = NotificationTemplate
+        fields = [
+            'id', 'title', 'body', 'type', 'status',
+            'created_by_details', 'created_at', 'updated_at',
+        ]
+        extra_kwargs = {
+            'status': {'read_only': True},  # only settable via set_status action, or NEW on create
+        }
 
 class SystemSettingsSerializer(serializers.ModelSerializer):
     updated_by_details = UserMinimalSerializer(source='updated_by', read_only=True)

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:isl_app/core/services/api_service.dart';
-import 'package:isl_app/widgets/Admin/admin_sidebar.dart';
-import 'package:isl_app/widgets/Admin/admin_top_header.dart';
+import 'package:isl_app/widgets/Head/department_head_sidebar.dart';
+import 'package:isl_app/widgets/Head/department_head_top_header.dart';
 
 // --- DATA MODEL ---
 class ActivityModel {
@@ -34,14 +34,14 @@ class ActivityModel {
 }
 
 // --- MAIN SCREEN ---
-class AdminActivityLogScreen extends StatefulWidget {
-  const AdminActivityLogScreen({super.key});
+class DepartmentHeadActivityLogScreen extends StatefulWidget {
+  const DepartmentHeadActivityLogScreen({super.key});
 
   @override
-  State<AdminActivityLogScreen> createState() => _AdminActivityLogScreenState();
+  State<DepartmentHeadActivityLogScreen> createState() => _DepartmentHeadActivityLogScreenState();
 }
 
-class _AdminActivityLogScreenState extends State<AdminActivityLogScreen> {
+class _DepartmentHeadActivityLogScreenState extends State<DepartmentHeadActivityLogScreen> {
   final Color sidebarColor = const Color(0xFF0F294D);
   final Color primaryBlue = const Color(0xFF163E75);
   final Color bgLight = const Color(0xFFF8FAFC);
@@ -320,11 +320,11 @@ class _AdminActivityLogScreenState extends State<AdminActivityLogScreen> {
       body: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const AdminSidebar(activeItem: "Activity Log"),
+          const DepartmentHeadSidebar(activeItem: "Activity Log"),
           Expanded(
             child: Column(
               children: [
-                const AdminTopHeader(
+                const DepartmentHeadTopHeader(
                   title: "Activity Log",
                   subtitle: "Track all system activities and user actions.",
                 ),

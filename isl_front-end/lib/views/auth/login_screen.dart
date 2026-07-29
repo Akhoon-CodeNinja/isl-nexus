@@ -7,7 +7,8 @@ import 'package:isl_app/core/constants/app_colors.dart';
 import 'package:isl_app/core/models/auth_models.dart';
 import 'package:isl_app/core/providers/app_state.dart';
 import 'package:isl_app/core/services/api_service.dart';
-import 'package:isl_app/views/admin/admin_dashboard_screen.dart';
+import 'package:isl_app/views/Head/department_head_dashboard_screen.dart';
+import 'package:isl_app/views/Admin/admin_dashboard_screen.dart';
 import 'package:isl_app/views/worker/worker_chat_screen.dart';
 import 'package:isl_app/widgets/auth/auth_text_field.dart';
 import 'package:isl_app/widgets/auth/auth_buttons.dart';
@@ -82,12 +83,17 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     final role = (appState.session?.role ?? '').toUpperCase();
-    final isActualAdmin = role == 'DEPARTMENT_HEAD';
+    final isAdmin = role == 'ADMIN';
+    final isDepartmentHead = role == 'DEPARTMENT_HEAD';
+    // Admin logs in through the same "Department Head" tab -- no separate
+    // UI/button for Admin, per requirement. Both count as the "staff" side
+    // of the toggle; the exact destination screen is decided below by role.
+    final isStaffRole = isAdmin || isDepartmentHead;
 
     // Check: UI selection vs Actual Role
-    final bool selectedAdmin = !_isWorker;
+    final bool selectedDepartmentHead = !_isWorker;
 
-    if (selectedAdmin != isActualAdmin) {
+    if (selectedDepartmentHead != isStaffRole) {
       await appState.logout();
       if (!mounted) return;
       setState(() => _loading = false);
@@ -102,9 +108,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() => _loading = false);
 
-    final destination = isActualAdmin
+    final Widget destination = isAdmin
         ? const AdminDashboardScreen()
-        : const WorkerChatScreen();
+        : isDepartmentHead
+            ? const DepartmentHeadDashboardScreen()
+            : const WorkerChatScreen();
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -156,9 +164,11 @@ class _LoginScreenState extends State<LoginScreen> {
       await apiService.saveSession(session);
 
       final role = session.role.toUpperCase();
-      final destination = role == 'DEPARTMENT_HEAD'
+      final Widget destination = role == 'ADMIN'
           ? const AdminDashboardScreen()
-          : const WorkerChatScreen();
+          : role == 'DEPARTMENT_HEAD'
+              ? const DepartmentHeadDashboardScreen()
+              : const WorkerChatScreen();
 
       Navigator.pushAndRemoveUntil(
         context,

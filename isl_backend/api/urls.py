@@ -4,7 +4,8 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from .views import (
     CustomTokenObtainPairView, MeView, DepartmentViewSet, DocumentViewSet, 
     TagViewSet, AlertViewSet, ChatMessageViewSet,
-    UserViewSet, AuditLogViewSet, SystemSettingsView, MicrosoftLoginView
+    UserViewSet, AuditLogViewSet, SystemSettingsView, MicrosoftLoginView,
+    NotificationTemplateViewSet
 )
 
 from .views import ChatAskView, ChatHistoryView, LeaveApplicationView
@@ -24,6 +25,7 @@ router.register(r'alerts', AlertViewSet, basename='alert')
 router.register(r'chat-messages', ChatMessageViewSet, basename='chatmessage')
 router.register(r'users', UserViewSet, basename='user')
 router.register(r'audit-logs', AuditLogViewSet, basename='auditlog')
+router.register(r'notification-templates', NotificationTemplateViewSet, basename='notificationtemplate')
 
 urlpatterns = [
     path('auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),

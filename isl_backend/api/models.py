@@ -111,6 +111,7 @@ class User(AbstractUser, UUIDModel):
     """
 
     class Role(models.TextChoices):
+        ADMIN = "ADMIN", "Admin"
         DEPARTMENT_HEAD = "DEPARTMENT_HEAD", "Department Head"
         WORKER = "WORKER", "Worker"
 
@@ -159,10 +160,32 @@ class User(AbstractUser, UUIDModel):
     def is_department_head(self) -> bool:
         return self.role == self.Role.DEPARTMENT_HEAD
 
+    @property
+    def is_admin(self) -> bool:
+        return self.role == self.Role.ADMIN
+
+    # Admin sits above Department Head in the hierarchy and can do
+    # everything a Head can (plus more, enforced per-view) -- this helper
+    # is what permission checks should use instead of checking
+    # is_department_head alone, so Admin is never accidentally excluded.
+    @property
+    def is_department_head_or_admin(self) -> bool:
+        return self.role in (self.Role.DEPARTMENT_HEAD, self.Role.ADMIN)
+
     can_manage_docs = models.BooleanField(
         default=False, 
         db_index=True,
         help_text="If True, this worker can upload and manage documents pending Head approval."
+    )
+
+    # Admin-only override for this user's daily AI-chat message limit.
+    # Null (the default) means "use the role-based default" -- see
+    # get_daily_limit() in views.py, which checks this field first.
+    chat_daily_limit_override = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Per-user override for the daily AI chat message limit. "
+                   "Null falls back to the role-based default (Admin=200, "
+                   "Department Head=100, Worker=30). Settable only by an Admin.",
     )
 
 # ---------------------------------------------------------------------------
@@ -357,6 +380,58 @@ class UserAlertRead(UUIDModel):
 
     def __str__(self) -> str:
         return f"{self.user.employee_id} read {self.alert_id}"
+
+
+# ---------------------------------------------------------------------------
+# Notification Templates (Admin-managed, reusable broadcast content)
+# ---------------------------------------------------------------------------
+class NotificationTemplate(UUIDModel):
+    """Reusable notification/alert templates that an Admin creates and
+    maintains. Not the alert itself -- these are drafts an Admin can pick
+    from when broadcasting via the existing Alert/send-notification flow.
+
+    Status lifecycle: NEW (just created) -> ACTIVE (Admin publishes it,
+    selectable when sending) -> INACTIVE (Admin retires it without
+    deleting, e.g. seasonal templates) -> deleted entirely if no longer
+    needed. This mirrors the "New / Update / Delete / Inactive" states
+    requested for the Admin notification-template screen.
+    """
+
+    class Status(models.TextChoices):
+        NEW = "NEW", "New"
+        ACTIVE = "ACTIVE", "Active"
+        INACTIVE = "INACTIVE", "Inactive"
+
+    title = models.CharField(max_length=255)
+    body = models.TextField()
+    type = models.CharField(
+        max_length=20,
+        choices=Alert.AlertType.choices,
+        default=Alert.AlertType.ANNOUNCEMENT,
+        help_text="Maps to Alert.type when this template is used to send an actual notification.",
+    )
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.NEW, db_index=True,
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="notification_templates",
+        db_column="created_by",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "notification_templates"
+        ordering = ["-updated_at"]
+        verbose_name = "Notification Template"
+        verbose_name_plural = "Notification Templates"
+
+    def __str__(self) -> str:
+        return f"{self.title} [{self.status}]"
 
 
 # ---------------------------------------------------------------------------

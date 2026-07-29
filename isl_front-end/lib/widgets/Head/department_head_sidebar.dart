@@ -1,24 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:isl_app/core/providers/app_state.dart';
-import 'package:isl_app/views/Admin/admin_documents_screen.dart';
-import 'package:isl_app/views/Admin/admin_departments_screen.dart';
-import 'package:isl_app/views/Admin/admin_upload_document_screen.dart';
-import 'package:isl_app/views/Admin/admin_uploaded_document_screen.dart';
-import 'package:isl_app/views/Admin/admin_activity_log_screen.dart';
-import 'package:isl_app/views/Admin/admin_users_screen.dart';
-import 'package:isl_app/views/Admin/admin_dashboard_screen.dart';
-import 'package:isl_app/views/Admin/admin_settings_screen.dart';
+import 'package:isl_app/views/Head/department_head_documents_screen.dart';
+import 'package:isl_app/views/Head/department_head_departments_screen.dart';
+import 'package:isl_app/views/Head/department_head_upload_document_screen.dart';
+import 'package:isl_app/views/Head/department_head_uploaded_document_screen.dart';
+import 'package:isl_app/views/Head/department_head_activity_log_screen.dart';
+import 'package:isl_app/views/Head/department_head_users_screen.dart';
+import 'package:isl_app/views/Head/department_head_dashboard_screen.dart';
+import 'package:isl_app/views/Head/department_head_settings_screen.dart';
 import 'package:isl_app/views/auth/login_screen.dart';
 // Nayi Notification screen ka import add kiya gaya hai
-import 'package:isl_app/views/Admin/admin_send_notification_screen.dart';
+import 'package:isl_app/views/Head/department_head_send_notification_screen.dart';
 // Naya AI Assistant chat screen ka import
-import 'package:isl_app/views/Admin/admin_chat_screen.dart';
+import 'package:isl_app/views/Head/department_head_chat_screen.dart';
 
-class AdminSidebar extends StatelessWidget {
+class DepartmentHeadSidebar extends StatelessWidget {
   final String activeItem;
 
-  const AdminSidebar({super.key, required this.activeItem});
+  const DepartmentHeadSidebar({super.key, required this.activeItem});
 
   static const Color _sidebarBg = Color(0xFF0F294D);
 
@@ -69,7 +69,7 @@ class AdminSidebar extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      "Admin Portal",
+                      "DepartmentHead Portal",
                       style: TextStyle(
                         color: Colors.grey.shade400,
                         fontSize: 11,
@@ -98,7 +98,7 @@ class AdminSidebar extends StatelessWidget {
                     isActive: activeItem == "Dashboard",
                     onTap: activeItem == "Dashboard"
                         ? null
-                        : () => _navigateTo(context, const AdminDashboardScreen()),
+                        : () => _navigateTo(context, const DepartmentHeadDashboardScreen()),
                   ),
                   _NavItem(
                     icon: Icons.smart_toy_outlined,
@@ -106,7 +106,7 @@ class AdminSidebar extends StatelessWidget {
                     isActive: activeItem == "AI Assistant",
                     onTap: activeItem == "AI Assistant"
                         ? null
-                        : () => _navigateTo(context, const AdminChatScreen()),
+                        : () => _navigateTo(context, const DepartmentHeadChatScreen()),
                   ),
                   _NavItem(
                     icon: Icons.business,
@@ -114,7 +114,7 @@ class AdminSidebar extends StatelessWidget {
                     isActive: activeItem == "Departments",
                     onTap: activeItem == "Departments"
                         ? null
-                        : () => _navigateTo(context, const AdminDepartmentsScreen()),
+                        : () => _navigateTo(context, const DepartmentHeadDepartmentsScreen()),
                   ),
                   _NavItem(
                     icon: Icons.description_outlined,
@@ -122,7 +122,7 @@ class AdminSidebar extends StatelessWidget {
                     isActive: activeItem == "Documents",
                     onTap: activeItem == "Documents"
                         ? null
-                        : () => _navigateTo(context, const AdminDocumentsScreen()),
+                        : () => _navigateTo(context, const DepartmentHeadDocumentsScreen()),
                   ),
                   _NavItem(
                     icon: Icons.cloud_upload_outlined,
@@ -130,7 +130,7 @@ class AdminSidebar extends StatelessWidget {
                     isActive: activeItem == "Upload Document",
                     onTap: activeItem == "Upload Document"
                         ? null
-                        : () => _navigateTo(context, AdminUploadDocumentScreen()),
+                        : () => _navigateTo(context, DepartmentHeadUploadDocumentScreen()),
                   ),
                   _NavItem(
                     icon: Icons.file_present_rounded,
@@ -138,7 +138,7 @@ class AdminSidebar extends StatelessWidget {
                     isActive: activeItem == "Uploaded Documents",
                     onTap: activeItem == "Uploaded Documents"
                         ? null
-                        : () => _navigateTo(context, AdminUploadedDocumentScreen()),
+                        : () => _navigateTo(context, DepartmentHeadUploadedDocumentScreen()),
                   ),
                   _NavItem(
                     icon: Icons.history,
@@ -146,7 +146,7 @@ class AdminSidebar extends StatelessWidget {
                     isActive: activeItem == "Activity Log",
                     onTap: activeItem == "Activity Log"
                         ? null
-                        : () => _navigateTo(context, const AdminActivityLogScreen()),
+                        : () => _navigateTo(context, const DepartmentHeadActivityLogScreen()),
                   ),
 
                   // ── Naya Notifications Button ──
@@ -156,7 +156,7 @@ class AdminSidebar extends StatelessWidget {
                     isActive: activeItem == "Notifications",
                     onTap: activeItem == "Notifications"
                         ? null
-                        : () => _navigateTo(context, const AdminSendNotificationScreen()),
+                        : () => _navigateTo(context, const DepartmentHeadSendNotificationScreen()),
                   ),
 
                   _NavItem(
@@ -165,7 +165,7 @@ class AdminSidebar extends StatelessWidget {
                     isActive: activeItem == "Users",
                     onTap: activeItem == "Users"
                         ? null
-                        : () => _navigateTo(context, const AdminUsersScreen()),
+                        : () => _navigateTo(context, const DepartmentHeadUsersScreen()),
                   ),
                   _NavItem(
                     icon: Icons.settings_outlined,
@@ -173,7 +173,7 @@ class AdminSidebar extends StatelessWidget {
                     isActive: activeItem == "Settings",
                     onTap: activeItem == "Settings"
                         ? null
-                        : () => _navigateTo(context, const AdminSettingsScreen()),
+                        : () => _navigateTo(context, const DepartmentHeadSettingsScreen()),
                   ),
                 ],
               ),

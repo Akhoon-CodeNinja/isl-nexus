@@ -13,37 +13,20 @@ class ApiService {
   final http.Client _client;
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
-  // NEW: signals that the chat screen should start a BRAND NEW chat
-  // session next time it loads, instead of resuming the last one.
-  // - Defaults to `true`, so the very first chat-screen load after the
-  //   app process starts (cold launch) gets a fresh chat.
-  // - Set back to `true` inside saveSession() below, which runs on every
-  //   successful login/register/OTP/Microsoft sign-in -- so signing out
-  //   and signing back in (even without restarting the app) also starts
-  //   a fresh chat, instead of silently resuming the previous one.
-  // - The chat screen sets this back to `false` once it has actually
-  //   started the new session, so normal navigation within the app
-  //   (switching tabs, going to Documents and back, etc.) keeps resuming
-  //   the same ongoing conversation as before.
   static bool needsFreshChatSession = true;
 
   static const String baseUrl = kIsWeb ? 'http://127.0.0.1:8000' : 'http://10.0.2.2:8000';
   
   static const String authLogin = '/api/auth/login/';
-  static const String authRefresh = '/api/auth/refresh/'; // Refresh endpoint
-  static const String authRegister = '/api/auth/register/';
-  static const String authVerifyOtp = '/api/auth/verify-otp/';
-  static const String authResendOtp = '/api/auth/resend-otp/';
+  static const String authRefresh = '/api/auth/refresh/'; 
   static const String authMicrosoft = '/api/auth/microsoft/';
   static const String me = '/api/auth/me/';
+  
   static const String documents = '/api/documents/';
   static const String departments = '/api/departments/';
   static const String users = '/api/users/';
   static const String chatAsk = '/api/chat/ask/';
   static const String chatHistory = '/api/chat/history/';
-  // NEW: "New Chat" button + sidebar "Recent" list support.
-  // NOTE: make sure these two paths are registered in your Django urls.py,
-  // pointing at ChatNewSessionView and ChatSessionListView respectively.
   static const String chatNewSession = '/api/chat/session/new/';
   static const String chatSessions = '/api/chat/sessions/';
   static const String leaveApply = '/api/leave/apply/';
@@ -51,17 +34,15 @@ class ApiService {
   static const String quickHelp = '/api/help/';
   static const String auditLogs = '/api/audit-logs/'; 
   static const String settings = '/api/settings/';
-  
-  // NEW ENDPOINTS ADDED FOR DASHBOARD STATS
   static const String syncStatus = '/api/system/sync-status/';
+  
+  // NAYA: Notification Templates Endpoint
+  static const String notificationTemplates = '/api/notification-templates/';
 
-  // MEMORY CACHE (Fixes Web Race Conditions)
   String? _memoryToken;
 
   Future<String?> _readToken() async {
-    // If token is in RAM, return immediately (No await delay)
     if (_memoryToken != null && _memoryToken!.isNotEmpty) return _memoryToken;
-    
     final prefs = await SharedPreferences.getInstance();
     _memoryToken = prefs.getString('access_token');
     return _memoryToken;
@@ -82,14 +63,11 @@ class ApiService {
   }
 
   Future<void> saveSession(AuthSession session) async {
-    _memoryToken = session.token; // Update immediately in RAM
-    // A real sign-in just happened -- make sure the next chat screen load
-    // starts a brand new chat instead of resuming whatever was last shown
-    // (which may belong to this same run's previous logged-in session).
+    _memoryToken = session.token;
     needsFreshChatSession = true;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('access_token', session.token);
-    await prefs.setString('refresh_token', session.refreshToken); // Also save Refresh token
+    await prefs.setString('refresh_token', session.refreshToken);
     await prefs.setString('role', session.role);
     await prefs.setString('user_id', session.userId);
     await prefs.setString('email', session.email);
@@ -126,6 +104,181 @@ class ApiService {
     );
   }
 
+  // --- AUTHENTICATION & PROFILE ---
+  Future<AuthSession> login({required String identifier, required String password}) async {
+    final response = await _post(
+      authLogin,
+      body: {'employee_id': identifier, 'password': password},
+      auth: false,
+    );
+    final data = response['data'] as Map<String, dynamic>? ?? {};
+    return AuthSession.fromJson(data);
+  }
+
+  Future<Map<String, dynamic>> loginWithMicrosoftToken(String token) async {
+    final response = await _post(
+      authMicrosoft,
+      body: {'access_token': token},
+      auth: false,
+    );
+    return response['data'] as Map<String, dynamic>? ?? {};
+  }
+
+  Future<UserProfile> getProfile() async {
+    final response = await _get(me);
+    final data = response['data'] as Map<String, dynamic>? ?? {};
+    return UserProfile.fromJson(data);
+  }
+
+  Future<UserProfile> updateProfile({required String fullName, required String email}) async {
+    final response = await _patch(me, body: {'full_name': fullName, 'email': email});
+    final data = response['data'] as Map<String, dynamic>? ?? {};
+    return UserProfile.fromJson(data);
+  }
+
+  // --- NOTIFICATION TEMPLATES (ADMIN) ---
+  Future<List<Map<String, dynamic>>> fetchNotificationTemplates({String? status}) async {
+    final query = <String, String>{};
+    if (status != null && status != 'All Status') query['status'] = status;
+    final response = await _get(notificationTemplates, query: query);
+    return _asList(response['data']);
+  }
+
+  Future<Map<String, dynamic>> createNotificationTemplate({
+    required String title, required String bodyText, required String type,
+  }) async {
+    final response = await _post(notificationTemplates, body: {'title': title, 'body': bodyText, 'type': type});
+    return response['data'] as Map<String, dynamic>? ?? {};
+  }
+
+  Future<Map<String, dynamic>> updateNotificationTemplate(String id, {
+    required String title, required String bodyText, required String type,
+  }) async {
+    final response = await _patch('$notificationTemplates$id/', body: {'title': title, 'body': bodyText, 'type': type});
+    return response['data'] as Map<String, dynamic>? ?? {};
+  }
+
+  Future<void> deleteNotificationTemplate(String id) async {
+    await _delete('$notificationTemplates$id/');
+  }
+
+  Future<void> setNotificationTemplateStatus(String id, String status) async {
+    await _patch('$notificationTemplates$id/set_status/', body: {'status': status});
+  }
+
+  // --- USERS MANAGEMENT (ADMIN) ---
+  Future<List<Map<String, dynamic>>> fetchUsersRaw({
+    String? search, String? department, String? role, String? status,
+  }) async {
+    final query = <String, String>{};
+    if (search != null && search.isNotEmpty) query['search'] = search;
+    if (department != null && department.isNotEmpty && department.toLowerCase() != 'all departments') query['department'] = department;
+    if (role != null && role.isNotEmpty && role.toLowerCase() != 'all roles') query['role'] = role;
+    if (status != null && status.isNotEmpty && status.toLowerCase() != 'all status') query['status'] = status;
+    final response = await _get(users, query: query);
+    return _asList(response['data']);
+  }
+
+  Future<void> addUser({
+    required String employeeId, required String name, required String email, 
+    required String password, required String role, required String department,
+  }) async {
+    await _post(users, body: {
+      'employee_id': employeeId, 'full_name': name, 'email': email,
+      'password': password, 'role': role, 'department': department,
+    });
+  }
+
+  Future<void> updateUser(String userId, {required String name, required String email, required String department}) async {
+    await _patch('$users$userId/', body: {'full_name': name, 'email': email, 'department': department});
+  }
+
+  Future<void> toggleUserStatus(String userId, bool active) async {
+    await _patch('$users$userId/status/', body: {'is_active': active});
+  }
+
+  Future<void> changeUserRole(String userId, String newRole) async {
+    await _patch('$users$userId/change_role/', body: {'role': newRole});
+  }
+
+  Future<void> toggleUploadAccess(String userId, bool canManage) async {
+    await _patch('$users$userId/toggle_upload_access/', body: {'can_manage_docs': canManage});
+  }
+
+  Future<void> setChatLimit(String userId, int? limit) async {
+    await _patch('$users$userId/set_chat_limit/', body: {'chat_daily_limit_override': limit});
+  }
+
+  Future<void> deleteUser(String userId) async {
+    await _delete('$users$userId/');
+  }
+
+  // --- DEPARTMENTS MANAGEMENT ---
+  Future<List<Map<String, dynamic>>> fetchDepartments() async {
+    return fetchDepartmentsRaw();
+  }
+
+  Future<List<Map<String, dynamic>>> fetchDepartmentsRaw() async {
+    final response = await _get(departments, auth: true); 
+    return _asList(response['data']);
+  }
+
+  Future<void> createDepartment({required String name, required String code, required String description}) async {
+    await _post(departments, body: {'name': name, 'code': code, 'description': description});
+  }
+
+  // --- DOCUMENTS MANAGEMENT ---
+  Future<List<DocumentItem>> fetchDocuments({String? search, String? status, String? dept, String? fileType}) async {
+    final query = <String, String>{};
+    if (search != null && search.isNotEmpty) query['search'] = search;
+    if (status != null && status.toLowerCase() != 'all status' && status.toLowerCase() != 'all') query['status'] = status;
+    if (dept != null && dept.toLowerCase() != 'all departments' && dept.toLowerCase() != 'all') query['department'] = dept;
+    if (fileType != null && fileType.toLowerCase() != 'all file types' && fileType.toLowerCase() != 'all') query['file_type'] = fileType;
+    
+    final response = await _get(documents, query: query);
+    final responseData = response['data'];
+    List<dynamic> items = [];
+    if (responseData is List) items = responseData;
+    else if (responseData is Map && responseData.containsKey('results')) items = responseData['results'] as List<dynamic>;
+
+    return items.map((e) => DocumentItem.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  Future<DocumentItem> createDocument(Map<String, dynamic> payload) async {
+    final response = await _post(documents, body: payload);
+    final data = response['data'] as Map<String, dynamic>? ?? {};
+    return DocumentItem.fromJson(data);
+  }
+
+  Future<DocumentItem> updateDocument(String id, Map<String, dynamic> payload) async {
+    final response = await _patch('$documents$id/', body: payload);
+    final data = response['data'] as Map<String, dynamic>? ?? {};
+    return DocumentItem.fromJson(data);
+  }
+
+  Future<void> deleteDocument(String id) async {
+    await _delete('$documents$id/');
+  }
+
+  Future<DocumentItem> toggleDocumentStatus(String id, bool active) async {
+    final response = await _patch('$documents$id/status/', body: {'is_active': active});
+    final data = response['data'] as Map<String, dynamic>? ?? {};
+    return DocumentItem.fromJson(data);
+  }
+
+  Future<DocumentItem> approveDocument(String id) async {
+    final response = await _post('$documents$id/approve/', body: {});
+    final data = response['data'] as Map<String, dynamic>? ?? {};
+    return DocumentItem.fromJson(data);
+  }
+
+  Future<DocumentItem> rejectDocument(String id) async {
+    final response = await _post('$documents$id/reject/', body: {});
+    final data = response['data'] as Map<String, dynamic>? ?? {};
+    return DocumentItem.fromJson(data);
+  }
+
+  // --- CHAT & HELP ---
   Future<Map<String, dynamic>> askChatWithReferences(String message) async {
     final response = await _post(chatAsk, body: {'message': message});
     final data = response['data'] as Map<String, dynamic>? ?? {};
@@ -145,52 +298,34 @@ class ApiService {
       'answer': (data['answer'] ?? data['response'] ?? 'No answer found.').toString(),
       'references': references,
       'required_docs': data['required_docs'] ?? [],
-      // Backend now also returns these two: 'intent' tells us if the bot
-      // detected a leave request (LEAVE_REQUEST) or the daily quota was
-      // hit (LIMIT_REACHED); 'remaining_messages_today' drives the
-      // input-bar disable state.
       'intent': data['intent']?.toString(),
       'remaining_messages_today': data['remaining_messages_today'],
     };
   }
 
-  /// GET /api/chat/history/ -- always scoped to the signed-in user's own
-  /// token, so it can never return another user's chat history.
-  /// [limit] lets the dedicated Chat History page pull more than the
-  /// default window shown on the live chat screen.
-  /// [sessionId] lets the sidebar's "Recent" list reopen one specific past
-  /// session (read-only) instead of always the latest/active one.
+  Future<String> askChat(String message) async {
+    final response = await _post(chatAsk, body: {'message': message});
+    final data = response['data'] as Map<String, dynamic>? ?? {};
+    return (data['answer'] ?? data['response'] ?? '').toString();
+  }
+
   Future<Map<String, dynamic>> fetchChatHistory({int? limit, String? sessionId}) async {
-    final response = await _get(
-      chatHistory,
-      query: {
-        if (limit != null) 'limit': limit.toString(),
-        'session_id': ?sessionId,
-      },
-    );
+    final response = await _get(chatHistory, query: {if (limit != null) 'limit': limit.toString(), 'session_id': ?sessionId});
     final data = response['data'] as Map<String, dynamic>? ?? {};
     final rawMessages = data['messages'] as List<dynamic>? ?? [];
     return {
       'session_id': data['session_id'],
       'daily_limit': data['daily_limit'],
       'remaining_messages_today': data['remaining_messages_today'],
-      'messages': rawMessages
-          .map((m) => Map<String, dynamic>.from(m as Map))
-          .toList(),
+      'messages': rawMessages.map((m) => Map<String, dynamic>.from(m as Map)).toList(),
     };
   }
 
-  /// POST /api/chat/session/new/ -- starts a brand new chat session for
-  /// the "New Chat" button (and once automatically on a fresh app launch).
-  /// The old session/messages are kept, just no longer "active".
   Future<Map<String, dynamic>> startNewChatSession() async {
     final response = await _post(chatNewSession, body: {});
     return response['data'] as Map<String, dynamic>? ?? {};
   }
 
-  /// GET /api/chat/sessions/ -- the signed-in user's own past chats
-  /// (most recent first), each with a short preview line. Powers the
-  /// "Recent" section of the chat sidebar.
   Future<List<Map<String, dynamic>>> fetchChatSessions() async {
     final response = await _get(chatSessions);
     final data = response['data'] as Map<String, dynamic>? ?? {};
@@ -198,263 +333,65 @@ class ApiService {
     return raw.map((s) => Map<String, dynamic>.from(s as Map)).toList();
   }
 
-  /// DELETE /api/chat/sessions/:id/ -- deletes a specific past chat session
   Future<void> deleteChatSession(String sessionId) async {
     await _delete('$chatSessions$sessionId/');
   }
 
-  /// DELETE /api/chat/sessions/ -- clears all chat history for this user
   Future<void> deleteAllChatSessions() async {
     await _delete(chatSessions); 
   }
 
-  /// POST /api/leave/apply/ -- submits a leave application, which the
-  /// backend routes to the worker's Department Head via the Alert system.
-  /// [leaveType] must be one of 'SICK', 'CASUAL', 'ANNUAL'.
-  Future<Map<String, dynamic>> submitLeaveApplication({
-    required String leaveType,
-    String reason = '',
-  }) async {
-    final response = await _post(
-      leaveApply,
-      body: {'leave_type': leaveType, 'reason': reason},
-    );
+  Future<void> sendFeedback(String messageId, bool helpful) async {
+    await _post('/api/chat/feedback/', body: {'message_id': messageId, 'helpful': helpful});
+  }
+
+  // --- LEAVES & ALERTS ---
+  Future<Map<String, dynamic>> submitLeaveApplication({required String leaveType, String reason = ''}) async {
+    final response = await _post(leaveApply, body: {'leave_type': leaveType, 'reason': reason});
     return response['data'] as Map<String, dynamic>? ?? {};
   }
 
-  Future<AuthSession> login({
-    required String identifier,
-    required String password,
-  }) async {
-    final response = await _post(
-      authLogin,
-      body: {'employee_id': identifier, 'password': password},
-      auth: false,
-    );
-    final data = response['data'] as Map<String, dynamic>? ?? {};
-    return AuthSession.fromJson(data);
+  Future<List<AlertItem>> fetchAlerts() async {
+    final response = await _get(alerts);
+    final items = response['data'] as List<dynamic>? ?? [];
+    return items.map((e) => AlertItem.fromJson(e as Map<String, dynamic>)).toList();
   }
 
-  Future<Map<String, dynamic>> register({
-    required String employeeId,
-    required String password,
-    required String fullName,
-    required String email,
-    required int department,
-  }) async {
-    final response = await _post(
-      authRegister,
-      body: {
-        'employee_id': employeeId,
-        'password': password,
-        'full_name': fullName,
-        'email': email,
-        'department': department,
-      },
-      auth: false,
-    );
+  Future<void> markAlertsRead() async {
+    await _patch(alerts, body: {'mark_all_read': true});
+  }
+
+  Future<void> sendNotification({required String title, required String description, required String type, String? targetDepartmentId}) async {
+    final payload = <String, dynamic>{'title': title, 'description': description, 'type': type};
+    if (targetDepartmentId != null && targetDepartmentId.isNotEmpty) {
+      payload['target_department'] = targetDepartmentId;
+    }
+    await _post(alerts, body: payload);
+  }
+
+  Future<List<QuickHelpItem>> fetchQuickHelp() async {
+    final response = await _get(quickHelp);
+    final items = response['data'] as List<dynamic>? ?? [];
+    return items.map((e) => QuickHelpItem.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  // --- SYSTEM SETTINGS & AUDIT LOGS ---
+  Future<Map<String, dynamic>> fetchSettings() async {
+    final response = await _get(settings);
     return response['data'] as Map<String, dynamic>? ?? {};
   }
 
-  Future<Map<String, dynamic>> verifyOtp({
-    required String employeeId,
-    required String otp,
-  }) async {
-    final response = await _post(
-      authVerifyOtp,
-      body: {
-        'employee_id': employeeId,
-        'otp': otp,
-      },
-      auth: false,
-    );
+  Future<Map<String, dynamic>> updateSettings(Map<String, dynamic> payload) async {
+    final response = await _patch(settings, body: payload);
     return response['data'] as Map<String, dynamic>? ?? {};
-  }
-
-  Future<String> resendOtp({required String employeeId}) async {
-    final response = await _post(
-      authResendOtp,
-      body: {'employee_id': employeeId},
-      auth: false,
-    );
-    final data = response['data'] as Map<String, dynamic>? ?? {};
-    return (data['message'] ?? 'OTP sent successfully.').toString();
-  }
-
-  Future<Map<String, dynamic>> loginWithMicrosoftToken(String token) async {
-    final response = await _post(
-      authMicrosoft,
-      body: {'access_token': token},
-      auth: false,
-    );
-    return response['data'] as Map<String, dynamic>? ?? {};
-  }
-
-  Future<UserProfile> getProfile() async {
-    final response = await _get(me);
-    final data = response['data'] as Map<String, dynamic>? ?? {};
-    return UserProfile.fromJson(data);
-  }
-
-  Future<UserProfile> updateProfile({
-    required String fullName,
-    required String email,
-  }) async {
-    final response = await _patch(
-      me,
-      body: {'full_name': fullName, 'email': email},
-    );
-    final data = response['data'] as Map<String, dynamic>? ?? {};
-    return UserProfile.fromJson(data);
-  }
-
-  Future<void> addUser({
-    required String name,
-    required String email,
-    required String role,
-    required String department,
-  }) async {
-    await _post(
-      users,
-      body: {
-        'full_name': name,
-        'email': email,
-        'role': role,
-        'department': department,
-      },
-    );
-  }
-
-  Future<List<DocumentItem>> fetchDocuments({
-    String? search,
-    String? status,
-    String? dept,
-    String? fileType,
-  }) async {
-    final query = <String, String>{};
-    if (search != null && search.isNotEmpty) query['search'] = search;
-    if (status != null && status.toLowerCase() != 'all status' && status.toLowerCase() != 'all') {
-      query['status'] = status;
-    }
-    if (dept != null && dept.toLowerCase() != 'all departments' && dept.toLowerCase() != 'all') {
-      query['department'] = dept;
-    }
-    if (fileType != null && fileType.toLowerCase() != 'all file types' && fileType.toLowerCase() != 'all') {
-      query['file_type'] = fileType;
-    }
-    
-    final response = await _get(documents, query: query);
-    final responseData = response['data'];
-
-    List<dynamic> items = [];
-    
-    if (responseData is List) {
-      items = responseData;
-    } else if (responseData is Map && responseData.containsKey('results')) {
-      items = responseData['results'] as List<dynamic>;
-    }
-
-    return items
-        .map((e) => DocumentItem.fromJson(e as Map<String, dynamic>))
-        .toList();
-  }
-
-  Future<DocumentItem> createDocument(Map<String, dynamic> payload) async {
-    final response = await _post(documents, body: payload);
-    final data = response['data'] as Map<String, dynamic>? ?? {};
-    return DocumentItem.fromJson(data);
-  }
-
-  Future<DocumentItem> updateDocument(
-    String id,
-    Map<String, dynamic> payload,
-  ) async {
-    final response = await _patch('$documents$id/', body: payload);
-    final data = response['data'] as Map<String, dynamic>? ?? {};
-    return DocumentItem.fromJson(data);
-  }
-
-  Future<void> deleteDocument(String id) async {
-    await _delete('$documents$id/');
-  }
-
-  Future<DocumentItem> toggleDocumentStatus(String id, bool active) async {
-    final response = await _patch(
-      '$documents$id/status/',
-      body: {'is_active': active},
-    );
-    final data = response['data'] as Map<String, dynamic>? ?? {};
-    return DocumentItem.fromJson(data);
-  }
-
-  Future<void> toggleUploadAccess(String userId, bool canManage) async {
-    await _patch(
-      '$users$userId/toggle_upload_access/',
-      body: {'can_manage_docs': canManage},
-    );
-  }
-
-  Future<DocumentItem> approveDocument(String id) async {
-    final response = await _post('$documents$id/approve/', body: {});
-    final data = response['data'] as Map<String, dynamic>? ?? {};
-    return DocumentItem.fromJson(data);
-  }
-
-  // --- NAYA FUNCTION: Reject Document ---
-  Future<DocumentItem> rejectDocument(String id) async {
-    final response = await _post('$documents$id/reject/', body: {});
-    final data = response['data'] as Map<String, dynamic>? ?? {};
-    return DocumentItem.fromJson(data);
-  }
-
-  Future<List<Map<String, dynamic>>> fetchDepartments() async {
-    return fetchDepartmentsRaw();
-  }
-
-  Future<List<Map<String, dynamic>>> fetchDepartmentsRaw() async {
-    // BUG FIX: Previously this was auth: false which caused a 401 error.
-    final response = await _get(departments, auth: true); 
-    return _asList(response['data']);
-  }
-
-  Future<List<Map<String, dynamic>>> fetchUsersRaw({
-    String? search,
-    String? department,
-    String? role,
-    String? status,
-  }) async {
-    final query = <String, String>{};
-    if (search != null && search.isNotEmpty) query['search'] = search;
-    if (department != null &&
-        department.isNotEmpty &&
-        department.toLowerCase() != 'all departments') {
-      query['department'] = department;
-    }
-    if (role != null && role.isNotEmpty && role.toLowerCase() != 'all roles') {
-      query['role'] = role;
-    }
-    if (status != null &&
-        status.isNotEmpty &&
-        status.toLowerCase() != 'all status') {
-      query['status'] = status;
-    }
-    final response = await _get(users, query: query);
-    return _asList(response['data']);
   }
 
   Future<Map<String, dynamic>> fetchActivityLogsRaw({
-    int page = 1,
-    String search = '',
-    String user = 'All Users',
-    String action = 'All Actions',
-    String module = 'All Modules',
-    DateTime? startDate,
-    DateTime? endDate,
+    int page = 1, String search = '', String user = 'All Users', 
+    String action = 'All Actions', String module = 'All Modules', 
+    DateTime? startDate, DateTime? endDate,
   }) async {
-    final query = <String, String>{
-      'page': page.toString(),
-    };
-    
+    final query = <String, String>{'page': page.toString()};
     if (search.isNotEmpty) query['search'] = search;
     if (user != 'All Users') query['user'] = user;
     if (action != 'All Actions') query['action'] = action;
@@ -466,172 +403,62 @@ class ApiService {
     return response['data'] as Map<String, dynamic>;
   }
   
-  // NEW METHOD: Fetch complete grouped stats for the dashboard without relying on page 1 extrapolation
   Future<List<dynamic>> fetchAuditLogStats() async {
     final response = await _get('${auditLogs}stats/');
     final data = response['data'];
-    if (data is List) {
-      return data;
-    } else if (data is Map && data.containsKey('results')) {
-      return data['results'] as List<dynamic>;
-    }
+    if (data is List) return data;
+    else if (data is Map && data.containsKey('results')) return data['results'] as List<dynamic>;
     return [];
   }
   
-  // NEW METHOD: Fetch real-time AI knowledge base sync status
   Future<Map<String, dynamic>> fetchSyncStatus() async {
     final response = await _get(syncStatus);
     return response['data'] as Map<String, dynamic>? ?? {};
   }
 
-  Future<List<dynamic>> fetchDistinctActivityValues({
-    required String field,
-  }) async {
-    final response = await _get(
-      '${auditLogs}distinct/',
-      query: {'field': field},
-    );
+  Future<List<dynamic>> fetchDistinctActivityValues({required String field}) async {
+    final response = await _get('${auditLogs}distinct/', query: {'field': field});
     final data = response['data'];
-    if (data is Map && data['values'] is List) {
-      return data['values'] as List<dynamic>;
-    }
+    if (data is Map && data['values'] is List) return data['values'] as List<dynamic>;
     return [];
   }
 
   List<Map<String, dynamic>> _asList(dynamic data) {
     if (data is List) return List<Map<String, dynamic>>.from(data);
-    if (data is Map && data['results'] is List) {
-      return List<Map<String, dynamic>>.from(data['results'] as List);
-    }
+    if (data is Map && data['results'] is List) return List<Map<String, dynamic>>.from(data['results'] as List);
     return [];
   }
 
-  Future<List<AlertItem>> fetchAlerts() async {
-    final response = await _get(alerts);
-    final items = response['data'] as List<dynamic>? ?? [];
-    return items
-        .map((e) => AlertItem.fromJson(e as Map<String, dynamic>))
-        .toList();
-  }
-
-  Future<void> markAlertsRead() async {
-    await _patch(alerts, body: {'mark_all_read': true});
-  }
-
-  // NEW: Admin panel se alerts/notifications bhejne ke liye
-  Future<void> sendNotification({
-    required String title,
-    required String description,
-    required String type,
-    String? targetDepartmentId, // null means 'All Departments'
-  }) async {
-    final payload = <String, dynamic>{
-      'title': title,
-      'description': description,
-      'type': type,
-    };
-
-    if (targetDepartmentId != null && targetDepartmentId.isNotEmpty) {
-      payload['target_department'] = targetDepartmentId;
-    }
-
-    await _post(alerts, body: payload);
-  }
-
-  Future<List<QuickHelpItem>> fetchQuickHelp() async {
-    final response = await _get(quickHelp);
-    final items = response['data'] as List<dynamic>? ?? [];
-    return items
-        .map((e) => QuickHelpItem.fromJson(e as Map<String, dynamic>))
-        .toList();
-  }
-
-  Future<Map<String, dynamic>> fetchSettings() async {
-    final response = await _get(settings);
-    return response['data'] as Map<String, dynamic>? ?? {};
-  }
-
-  Future<Map<String, dynamic>> updateSettings(
-    Map<String, dynamic> payload,
-  ) async {
-    final response = await _patch(settings, body: payload);
-    return response['data'] as Map<String, dynamic>? ?? {};
-  }
-
-  Future<String> askChat(String message) async {
-    final response = await _post(chatAsk, body: {'message': message});
-    final data = response['data'] as Map<String, dynamic>? ?? {};
-    return (data['answer'] ?? data['response'] ?? '').toString();
-  }
-
-  Future<void> sendFeedback(String messageId, bool helpful) async {
-    await _post(
-      '/api/chat/feedback/',
-      body: {'message_id': messageId, 'helpful': helpful},
-    );
-  }
-
   // --- INTERNAL REQUEST HELPERS ---
-  Future<Map<String, dynamic>> _get(
-    String path, {
-    Map<String, String>? query,
-    bool auth = true,
-  }) async {
+  Future<Map<String, dynamic>> _get(String path, {Map<String, String>? query, bool auth = true}) async {
     return _request('GET', path, query: query, auth: auth);
   }
 
-  Future<Map<String, dynamic>> _post(
-    String path, {
-    required Map<String, dynamic> body,
-    bool auth = true,
-  }) async {
+  Future<Map<String, dynamic>> _post(String path, {required Map<String, dynamic> body, bool auth = true}) async {
     return _request('POST', path, body: body, auth: auth);
   }
 
-  Future<Map<String, dynamic>> _patch(
-    String path, {
-    Map<String, dynamic>? body,
-    bool auth = true,
-  }) async {
+  Future<Map<String, dynamic>> _patch(String path, {Map<String, dynamic>? body, bool auth = true}) async {
     return _request('PATCH', path, body: body, auth: auth);
   }
 
-  Future<Map<String, dynamic>> _delete(
-    String path, {
-    bool auth = true,
-  }) async {
+  Future<Map<String, dynamic>> _delete(String path, {bool auth = true}) async {
     return _request('DELETE', path, auth: auth);
   }
 
-  // BUG FIX: Auto-Token Refresh Logic added to _request
-  Future<Map<String, dynamic>> _request(
-    String method,
-    String path, {
-    Map<String, dynamic>? body,
-    Map<String, String>? query,
-    bool auth = true,
-    bool isRetry = false, // To avoid infinite loops
-  }) async {
+  Future<Map<String, dynamic>> _request(String method, String path, {Map<String, dynamic>? body, Map<String, String>? query, bool auth = true, bool isRetry = false}) async {
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
     final headers = await _headers(auth: auth);
     http.Response response;
     try {
       if (method == 'GET') {
-        response = await _client
-            .get(uri, headers: headers)
-            .timeout(const Duration(seconds: 15));
+        response = await _client.get(uri, headers: headers).timeout(const Duration(seconds: 15));
       } else if (method == 'POST') {
-        response = await _client
-            .post(uri, headers: headers, body: jsonEncode(body ?? {}))
-            .timeout(const Duration(seconds: 15));
+        response = await _client.post(uri, headers: headers, body: jsonEncode(body ?? {})).timeout(const Duration(seconds: 15));
       } else if (method == 'PATCH') {
-        response = await _client
-            .patch(uri, headers: headers, body: jsonEncode(body ?? {}))
-            .timeout(const Duration(seconds: 15));
+        response = await _client.patch(uri, headers: headers, body: jsonEncode(body ?? {})).timeout(const Duration(seconds: 15));
       } else {
-        response = await _client
-            .delete(uri, headers: headers)
-            .timeout(const Duration(seconds: 15));
+        response = await _client.delete(uri, headers: headers).timeout(const Duration(seconds: 15));
       }
     } on SocketException catch (_) {
       throw Exception('Network unavailable. Please check your connection.');
@@ -646,25 +473,16 @@ class ApiService {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       final bodyText = response.body.isEmpty ? '{}' : response.body;
       final decoded = jsonDecode(bodyText);
-      if (decoded is Map<String, dynamic>) {
-        return {'data': decoded};
-      }
-      if (decoded is List) {
-        return {'data': decoded};
-      }
+      if (decoded is Map<String, dynamic>) return {'data': decoded};
+      if (decoded is List) return {'data': decoded};
       return {'data': decoded};
     }
 
-    // INTERCEPTOR: If 401 occurs, silently send Refresh Token
     if (response.statusCode == 401) {
       if (!isRetry && auth) {
         final refreshed = await _attemptTokenRefresh();
-        if (refreshed) {
-          // Token refreshed! Retry the original API call
-          return _request(method, path, body: body, query: query, auth: auth, isRetry: true);
-        }
+        if (refreshed) return _request(method, path, body: body, query: query, auth: auth, isRetry: true);
       }
-      // If refresh also fails, log out the user
       await clearSession();
       throw Exception('Session expired. Please sign in again.');
     }
@@ -672,7 +490,6 @@ class ApiService {
     throw Exception(_extractErrorMessage(response));
   }
 
-  // New Method: To refresh token in the background
   Future<bool> _attemptTokenRefresh() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -690,8 +507,8 @@ class ApiService {
         final data = jsonDecode(response.body);
         final newAccess = data['access'] ?? data['token'];
         if (newAccess != null) {
-          _memoryToken = newAccess; // Update RAM cache
-          await prefs.setString('access_token', newAccess); // Update Disk storage
+          _memoryToken = newAccess;
+          await prefs.setString('access_token', newAccess);
           return true;
         }
       }
@@ -709,49 +526,12 @@ class ApiService {
         if (decoded['message'] != null) return decoded['message'].toString();
         if (decoded['detail'] != null) return decoded['detail'].toString();
         final firstKey = decoded.keys.isNotEmpty ? decoded.keys.first : null;
-        if (firstKey != null &&
-            decoded[firstKey] is List &&
-            (decoded[firstKey] as List).isNotEmpty) {
+        if (firstKey != null && decoded[firstKey] is List && (decoded[firstKey] as List).isNotEmpty) {
           return '$firstKey: ${(decoded[firstKey] as List).first}';
         }
       }
-    } catch (_) {
-      // fall through
-    }
+    } catch (_) {}
     return 'Request failed (${response.statusCode}).';
-  }
-
-  Future<void> toggleUserStatus(String userId, bool active) async {
-    await _patch(
-      '$users$userId/status/',
-      body: {'is_active': active},
-    );
-  }
-
-  Future<void> changeUserRole(String userId, String newRole) async {
-    await _patch(
-      '$users$userId/change_role/',
-      body: {'role': newRole},
-    );
-  }
-
-  Future<void> updateUser(String userId, {
-    required String name,
-    required String email,
-    required String department,
-  }) async {
-    await _patch(
-      '$users$userId/',
-      body: {
-        'full_name': name,
-        'email': email,
-        'department': department,
-      },
-    );
-  }
-
-  Future<void> deleteUser(String userId) async {
-    await _delete('$users$userId/');
   }
 }
 

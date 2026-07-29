@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:isl_app/core/models/document_models.dart';
 import 'package:isl_app/core/providers/app_state.dart';
-import 'package:isl_app/widgets/Admin/admin_sidebar.dart';
-import 'package:isl_app/widgets/Admin/admin_top_header.dart';
-import 'package:isl_app/views/Admin/admin_upload_document_screen.dart';
+import 'package:isl_app/widgets/Head/department_head_sidebar.dart';
+import 'package:isl_app/widgets/Head/department_head_top_header.dart';
+import 'package:isl_app/views/Head/department_head_upload_document_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,8 +12,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 // "MY UPLOADS" SCREEN
 //
 // BUG FIX: This file used to be a byte-for-byte duplicate of
-// AdminUploadDocumentScreen (the upload FORM) — same title, same fields,
-// even the same hardcoded `AdminSidebar(activeItem: "Upload Document")`.
+// DepartmentHeadUploadDocumentScreen (the upload FORM) — same title, same fields,
+// even the same hardcoded `DepartmentHeadSidebar(activeItem: "Upload Document")`.
 // So tapping "My Uploads" in the sidebar re-rendered the exact same screen
 // you were already looking at (visually indistinguishable, sidebar
 // highlight didn't even move), which looked like navigation wasn't
@@ -23,18 +23,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 // documents *uploaded by the signed-in user themself* — including ones
 // still PENDING their own department's approval — with quick View/Download
 // actions. Uploading a *new* document still happens on the separate
-// "Add Document" screen (AdminUploadDocumentScreen).
+// "Add Document" screen (DepartmentHeadUploadDocumentScreen).
 // ─────────────────────────────────────────────────────────────────────────────
-class AdminUploadedDocumentScreen extends StatefulWidget {
-  const AdminUploadedDocumentScreen({super.key});
+class DepartmentHeadUploadedDocumentScreen extends StatefulWidget {
+  const DepartmentHeadUploadedDocumentScreen({super.key});
 
   @override
-  State<AdminUploadedDocumentScreen> createState() =>
-      _AdminUploadedDocumentScreenState();
+  State<DepartmentHeadUploadedDocumentScreen> createState() =>
+      _DepartmentHeadUploadedDocumentScreenState();
 }
 
-class _AdminUploadedDocumentScreenState
-    extends State<AdminUploadedDocumentScreen> {
+class _DepartmentHeadUploadedDocumentScreenState
+    extends State<DepartmentHeadUploadedDocumentScreen> {
   final Color primaryBlue = const Color(0xFF163E75);
   final Color bgLight = const Color(0xFFF8FAFC);
   final Color borderLight = Colors.grey.shade200;
@@ -149,11 +149,11 @@ class _AdminUploadedDocumentScreenState
       body: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const AdminSidebar(activeItem: "Uploaded Documents"),
+          const DepartmentHeadSidebar(activeItem: "Uploaded Documents"),
           Expanded(
             child: Column(
               children: [
-                const AdminTopHeader(
+                const DepartmentHeadTopHeader(
                   title: "My Uploads",
                   subtitle: "Documents you've uploaded yourself, including any still awaiting approval.",
                 ),
@@ -233,7 +233,7 @@ class _AdminUploadedDocumentScreenState
         onPressed: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => const AdminUploadDocumentScreen()),
+            MaterialPageRoute(builder: (_) => const DepartmentHeadUploadDocumentScreen()),
           ).then((_) => _fetchMyUploads());
         },
       ),

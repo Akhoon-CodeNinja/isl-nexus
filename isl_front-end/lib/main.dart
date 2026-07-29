@@ -4,7 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:isl_app/core/constants/app_colors.dart';
 import 'package:isl_app/core/providers/app_state.dart';
 import 'package:isl_app/services/auth_service.dart';
-import 'package:isl_app/views/admin/admin_dashboard_screen.dart';
+import 'package:isl_app/views/Head/department_head_dashboard_screen.dart';
+import 'package:isl_app/views/Admin/admin_dashboard_screen.dart';
 import 'package:isl_app/views/auth/login_screen.dart';
 import 'package:isl_app/views/worker/worker_chat_screen.dart';
 import 'package:provider/provider.dart';
@@ -55,10 +56,13 @@ class _ISLAppState extends State<ISLApp> {
 
     if (isAuthenticated) {
       final role = await _authService.getStoredUserRole();
+      final normalizedRole = role?.trim().toUpperCase();
       setState(() {
-        _home = _authService.isAdminRole(role)
+        _home = normalizedRole == 'ADMIN'
             ? const AdminDashboardScreen()
-            : const WorkerChatScreen();
+            : _authService.isDepartmentHeadRole(role)
+                ? const DepartmentHeadDashboardScreen()
+                : const WorkerChatScreen();
         _isCheckingSession = false;
       });
       return;

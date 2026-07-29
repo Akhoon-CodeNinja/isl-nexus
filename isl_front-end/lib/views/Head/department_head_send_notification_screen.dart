@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:isl_app/core/services/api_service.dart';
-import 'package:isl_app/widgets/Admin/admin_sidebar.dart';
-import 'package:isl_app/widgets/Admin/admin_top_header.dart';
+import 'package:isl_app/widgets/Head/department_head_sidebar.dart';
+import 'package:isl_app/widgets/Head/department_head_top_header.dart';
 
-class AdminSendNotificationScreen extends StatefulWidget {
-  const AdminSendNotificationScreen({super.key});
+class DepartmentHeadSendNotificationScreen extends StatefulWidget {
+  const DepartmentHeadSendNotificationScreen({super.key});
 
   @override
-  State<AdminSendNotificationScreen> createState() => _AdminSendNotificationScreenState();
+  State<DepartmentHeadSendNotificationScreen> createState() => _DepartmentHeadSendNotificationScreenState();
 }
 
-class _AdminSendNotificationScreenState extends State<AdminSendNotificationScreen> {
+class _DepartmentHeadSendNotificationScreenState extends State<DepartmentHeadSendNotificationScreen> {
   static const Color _primaryBlue = Color(0xFF163E75);
   final ApiService _apiService = ApiService();
   
@@ -108,14 +108,14 @@ class _AdminSendNotificationScreenState extends State<AdminSendNotificationScree
       body: Row(
         children: [
           // ── Sidebar ──────────────────────────────────────────────────────────
-          const AdminSidebar(activeItem: 'Notifications'),
+          const DepartmentHeadSidebar(activeItem: 'Notifications'),
 
           // ── Main Content Area ──────────────────────────────────────────────
           Expanded(
             child: Column(
               children: [
                 // ── Header ───────────────────────────────────────────────────
-                const AdminTopHeader(
+                const DepartmentHeadTopHeader(
                   title: 'Send Notification',
                   subtitle: 'Broadcast alerts or updates to workers and departments.',
                 ),

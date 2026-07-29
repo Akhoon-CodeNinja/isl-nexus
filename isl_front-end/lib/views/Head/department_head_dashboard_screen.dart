@@ -6,22 +6,22 @@ import 'package:fl_chart/fl_chart.dart';
 // Essential API Service import for backend communication
 import 'package:isl_app/core/services/api_service.dart';
 
-import 'package:isl_app/views/Admin/admin_documents_screen.dart';
-import 'package:isl_app/views/Admin/admin_departments_screen.dart';
-import 'package:isl_app/views/Admin/admin_activity_log_screen.dart';
-import 'package:isl_app/views/Admin/admin_users_screen.dart';
+import 'package:isl_app/views/Head/department_head_documents_screen.dart';
+import 'package:isl_app/views/Head/department_head_departments_screen.dart';
+import 'package:isl_app/views/Head/department_head_activity_log_screen.dart';
+import 'package:isl_app/views/Head/department_head_users_screen.dart';
 
-import 'package:isl_app/widgets/Admin/admin_sidebar.dart';
-import 'package:isl_app/widgets/Admin/admin_top_header.dart';
+import 'package:isl_app/widgets/Head/department_head_sidebar.dart';
+import 'package:isl_app/widgets/Head/department_head_top_header.dart';
 
-class AdminDashboardScreen extends StatefulWidget {
-  const AdminDashboardScreen({super.key});
+class DepartmentHeadDashboardScreen extends StatefulWidget {
+  const DepartmentHeadDashboardScreen({super.key});
 
   @override
-  State<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
+  State<DepartmentHeadDashboardScreen> createState() => _DepartmentHeadDashboardScreenState();
 }
 
-class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
+class _DepartmentHeadDashboardScreenState extends State<DepartmentHeadDashboardScreen> {
   final Color primaryBlue = const Color(0xFF163E75);
   final Color bgLight = const Color(0xFFF8FAFC);
   final Color borderLight = Colors.grey.shade200;
@@ -70,7 +70,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
     if (mounted) {
       setState(() {
-        _fullName = (name != null && name.isNotEmpty) ? name : "Admin";
+        _fullName = (name != null && name.isNotEmpty) ? name : "DepartmentHead";
       });
     }
   }
@@ -233,11 +233,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       body: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const AdminSidebar(activeItem: "Dashboard"),
+          const DepartmentHeadSidebar(activeItem: "Dashboard"),
           Expanded(
             child: Column(
               children: [
-                AdminTopHeader(
+                DepartmentHeadTopHeader(
                   title: "Dashboard",
                   subtitle: "Welcome back, $_fullName! Here's what's happening at ISL.",
                 ),
@@ -254,15 +254,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               return Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  _buildAnimatedCard(index: 0, child: _buildUploadsOverview(), onTap: () => _navigateTo(const AdminDocumentsScreen())),
+                                  _buildAnimatedCard(index: 0, child: _buildUploadsOverview(), onTap: () => _navigateTo(const DepartmentHeadDocumentsScreen())),
                                   const SizedBox(height: 24),
-                                  _buildAnimatedCard(index: 1, child: _buildAIKnowledgeBase(), onTap: () => _navigateTo(const AdminDocumentsScreen())),
+                                  _buildAnimatedCard(index: 1, child: _buildAIKnowledgeBase(), onTap: () => _navigateTo(const DepartmentHeadDocumentsScreen())),
                                   const SizedBox(height: 24),
-                                  _buildAnimatedCard(index: 2, child: _buildDepartmentOverview(), onTap: () => _navigateTo(const AdminDepartmentsScreen())),
+                                  _buildAnimatedCard(index: 2, child: _buildDepartmentOverview(), onTap: () => _navigateTo(const DepartmentHeadDepartmentsScreen())),
                                   const SizedBox(height: 24),
-                                  _buildAnimatedCard(index: 3, child: _buildActivityOverview(), onTap: () => _navigateTo(const AdminActivityLogScreen())),
+                                  _buildAnimatedCard(index: 3, child: _buildActivityOverview(), onTap: () => _navigateTo(const DepartmentHeadActivityLogScreen())),
                                   const SizedBox(height: 24),
-                                  _buildAnimatedCard(index: 4, child: _buildUserOverview(), onTap: () => _navigateTo(const AdminUsersScreen())),
+                                  _buildAnimatedCard(index: 4, child: _buildUserOverview(), onTap: () => _navigateTo(const DepartmentHeadUsersScreen())),
                                 ],
                               );
                             } else {
@@ -277,13 +277,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                           _buildAnimatedCard(
                                             index: 0,
                                             child: _buildUploadsOverview(),
-                                            onTap: () => _navigateTo(const AdminDocumentsScreen()),
+                                            onTap: () => _navigateTo(const DepartmentHeadDocumentsScreen()),
                                           ),
                                           const SizedBox(height: 24),
                                           _buildAnimatedCard(
                                             index: 3,
                                             child: _buildActivityOverview(),
-                                            onTap: () => _navigateTo(const AdminActivityLogScreen()),
+                                            onTap: () => _navigateTo(const DepartmentHeadActivityLogScreen()),
                                           ),
                                         ],
                                       ),
@@ -295,13 +295,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                           _buildAnimatedCard(
                                             index: 1,
                                             child: _buildAIKnowledgeBase(),
-                                            onTap: () => _navigateTo(const AdminDocumentsScreen()),
+                                            onTap: () => _navigateTo(const DepartmentHeadDocumentsScreen()),
                                           ),
                                           const SizedBox(height: 24),
                                           _buildAnimatedCard(
                                             index: 4,
                                             child: _buildUserOverview(),
-                                            onTap: () => _navigateTo(const AdminUsersScreen()),
+                                            onTap: () => _navigateTo(const DepartmentHeadUsersScreen()),
                                           ),
                                         ],
                                       ),
@@ -311,7 +311,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                       child: _buildAnimatedCard(
                                         index: 2,
                                         child: _buildDepartmentOverview(),
-                                        onTap: () => _navigateTo(const AdminDepartmentsScreen()),
+                                        onTap: () => _navigateTo(const DepartmentHeadDepartmentsScreen()),
                                       ),
                                     ),
                                   ],
@@ -330,7 +330,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               child: _buildAnimatedCard(
                                 index: 5,
                                 child: _buildEmployeesBarChart(),
-                                onTap: () => _navigateTo(const AdminDepartmentsScreen()),
+                                onTap: () => _navigateTo(const DepartmentHeadDepartmentsScreen()),
                               ),
                             ),
                           ],

@@ -3,20 +3,20 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:isl_app/widgets/Admin/admin_sidebar.dart';
-import 'package:isl_app/widgets/Admin/admin_top_header.dart';
-import 'package:isl_app/views/Admin/admin_documents_screen.dart'; 
+import 'package:isl_app/widgets/Head/department_head_sidebar.dart';
+import 'package:isl_app/widgets/Head/department_head_top_header.dart';
+import 'package:isl_app/views/Head/department_head_documents_screen.dart'; 
 import 'package:isl_app/views/worker/worker_documents_screen.dart';
 
-class AdminUploadDocumentScreen extends StatefulWidget {
-  const AdminUploadDocumentScreen({super.key});
+class DepartmentHeadUploadDocumentScreen extends StatefulWidget {
+  const DepartmentHeadUploadDocumentScreen({super.key});
 
   @override
-  State<AdminUploadDocumentScreen> createState() =>
-      _AdminUploadDocumentScreenState();
+  State<DepartmentHeadUploadDocumentScreen> createState() =>
+      _DepartmentHeadUploadDocumentScreenState();
 }
 
-class _AdminUploadDocumentScreenState extends State<AdminUploadDocumentScreen> {
+class _DepartmentHeadUploadDocumentScreenState extends State<DepartmentHeadUploadDocumentScreen> {
   // Brand Colors
   final Color sidebarColor = const Color(0xFF0F294D);
   final Color primaryBlue = const Color(0xFF163E75);
@@ -241,12 +241,12 @@ class _AdminUploadDocumentScreenState extends State<AdminUploadDocumentScreen> {
         if (mounted) {
           // NEW: Worker uploads land back on their own Documents screen,
           // not the Head's admin panel — only a DEPARTMENT_HEAD (or ADMIN)
-          // gets sent to AdminDocumentsScreen.
+          // gets sent to DepartmentHeadDocumentsScreen.
           final role = (prefs.getString('role') ?? '').toUpperCase();
           if (role == 'DEPARTMENT_HEAD' || role == 'ADMIN') {
             Navigator.pushReplacement(
               context,
-              MaterialPageRoute(builder: (_) => const AdminDocumentsScreen()),
+              MaterialPageRoute(builder: (_) => const DepartmentHeadDocumentsScreen()),
             );
           } else {
             Navigator.pushReplacement(
@@ -372,11 +372,11 @@ class _AdminUploadDocumentScreenState extends State<AdminUploadDocumentScreen> {
       body: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const AdminSidebar(activeItem: "Upload Document"),
+          const DepartmentHeadSidebar(activeItem: "Upload Document"),
           Expanded(
             child: Column(
               children: [
-                const AdminTopHeader(
+                const DepartmentHeadTopHeader(
                   title: "Upload Document",
                   subtitle:
                       "Upload and organize documents to sync with ISL AI Assistant.",

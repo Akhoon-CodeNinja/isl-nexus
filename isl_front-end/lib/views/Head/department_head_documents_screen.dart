@@ -2,20 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:isl_app/core/models/document_models.dart';
 import 'package:isl_app/core/providers/app_state.dart';
 import 'package:isl_app/core/services/api_service.dart';
-import 'package:isl_app/widgets/Admin/admin_sidebar.dart';
-import 'package:isl_app/widgets/Admin/admin_top_header.dart';
+import 'package:isl_app/widgets/Head/department_head_sidebar.dart';
+import 'package:isl_app/widgets/Head/department_head_top_header.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-class AdminDocumentsScreen extends StatefulWidget {
-  const AdminDocumentsScreen({super.key});
+class DepartmentHeadDocumentsScreen extends StatefulWidget {
+  const DepartmentHeadDocumentsScreen({super.key});
 
   @override
-  State<AdminDocumentsScreen> createState() => _AdminDocumentsScreenState();
+  State<DepartmentHeadDocumentsScreen> createState() => _DepartmentHeadDocumentsScreenState();
 }
 
-class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
+class _DepartmentHeadDocumentsScreenState extends State<DepartmentHeadDocumentsScreen> {
   final Color sidebarColor = const Color(0xFF0F294D);
   final Color primaryBlue = const Color(0xFF163E75);
   final Color bgLight = const Color(0xFFF8FAFC);
@@ -33,10 +33,11 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
   bool isAllSelected = false;
   bool _pendingOnly = false; // NEW: Head's "Pending Approval" tab/filter
 
-  // Signed-in user's own department id — used ONLY to restrict the
-  // "Pending Approval" tab for a DEPARTMENT_HEAD. "All Documents" tab
-  // stays unrestricted (all departments) for everyone, and for ADMIN this
-  // stays null so the Pending tab is unrestricted too (see _fetchDocuments).
+  // Head's own department id — used ONLY to restrict the "Pending Approval"
+  // tab. "All Documents" tab stays unrestricted (all departments).
+  // NOTE: adjust `appState.departmentId` below if your AppState exposes
+  // the logged-in user's department id under a different name/path
+  // (e.g. `appState.currentUser?.departmentId`).
   String? _myDepartmentId;
 
   String selectedDept = 'All Departments';
@@ -57,16 +58,7 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
 
     if (!mounted) return;
 
-    // Admin sees every department's pending items too — the department
-    // restriction on the "Pending Approval" tab is a Head-only scoping
-    // rule, mirroring the backend's Alert.objects.all() treatment for
-    // ADMIN. So _myDepartmentId is left null for Admin, which the filters
-    // below already treat as "no restriction".
-    final prefs = await SharedPreferences.getInstance();
-    final role = (prefs.getString('role') ?? prefs.getString('user_role') ?? '')
-        .trim()
-        .toUpperCase();
-    _myDepartmentId = role == 'ADMIN' ? null : appState.departmentId;
+    _myDepartmentId = appState.departmentId;
 
     // The Department filter should only ever show departments that actually
     // exist in the Department table — not whatever strings happen to show
@@ -172,11 +164,11 @@ class _AdminDocumentsScreenState extends State<AdminDocumentsScreen> {
       body: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const AdminSidebar(activeItem: "Documents"),
+          const DepartmentHeadSidebar(activeItem: "Documents"),
           Expanded(
             child: Column(
               children: [
-                const AdminTopHeader(
+                const DepartmentHeadTopHeader(
                   title: "Document Management",
                   subtitle:
                       "Manage all AI knowledge documents, SOPs, manuals and policies.",
