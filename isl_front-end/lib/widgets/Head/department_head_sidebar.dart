@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:isl_app/core/providers/app_state.dart';
 import 'package:isl_app/views/Head/department_head_documents_screen.dart';
-import 'package:isl_app/views/Head/department_head_departments_screen.dart';
 import 'package:isl_app/views/Head/department_head_upload_document_screen.dart';
 import 'package:isl_app/views/Head/department_head_uploaded_document_screen.dart';
 import 'package:isl_app/views/Head/department_head_activity_log_screen.dart';
@@ -108,14 +107,17 @@ class DepartmentHeadSidebar extends StatelessWidget {
                         ? null
                         : () => _navigateTo(context, const DepartmentHeadChatScreen()),
                   ),
-                  _NavItem(
-                    icon: Icons.business,
-                    title: "Departments",
-                    isActive: activeItem == "Departments",
-                    onTap: activeItem == "Departments"
-                        ? null
-                        : () => _navigateTo(context, const DepartmentHeadDepartmentsScreen()),
-                  ),
+                  // NOTE: "Departments" nav item removed for Department
+                  // Head per RBAC requirement — only Admin manages/views
+                  // the departments overview. Read access to the raw
+                  // department list (id+name, for dropdowns like the
+                  // document-upload/notification-target selectors) is
+                  // intentionally still open at the API level for any
+                  // authenticated user — see DepartmentViewSet.get_permissions
+                  // in views.py, which restricts only create/update/destroy
+                  // to IsAdminOnly. If a fully separate Admin-only portal is
+                  // built later, that's where a "Departments" nav item
+                  // belongs instead.
                   _NavItem(
                     icon: Icons.description_outlined,
                     title: "All Documents",

@@ -65,6 +65,42 @@ def _load_pages(doc_path):
 
 def process_and_add_document(doc_path, doc_id, doc_title):
     try:
+        # SECURITY FIX: this function runs from a post_save signal on
+        # every Document save, which previously meant a document could
+        # get indexed (and become searchable via chat by ANY user,
+        # regardless of department) the instant it was uploaded --
+        # before a Head/Admin ever approved it. It also never recorded
+        # which department(s) a document belongs to, so once indexed a
+        # document was retrievable by every user regardless of role or
+        # department.
+        #
+        # Both are fixed here: (1) look up the actual Document row and
+        # skip indexing entirely if it isn't active yet (sync_vector_store
+        # in views.py will pick it up for real once it's approved+active),
+        # and (2) tag every chunk with the department(s) it belongs to, so
+        # retrieval (services.py::_handle_company_query) can filter results
+        # to only what the querying user is actually allowed to see. An
+        # empty department_ids list means "no department restriction" (a
+        # general/company-wide document), visible to everyone -- same
+        # convention as target_department=None elsewhere in this codebase.
+        department_ids = []
+        try:
+            from .models import Document as DocumentModel
+            doc_row = DocumentModel.objects.filter(id=doc_id).first()
+            if doc_row is None:
+                print(f"[process_and_add_document] doc_id={doc_id} not found, skipping index.")
+                return
+            if not doc_row.is_active:
+                print(f"[process_and_add_document] '{doc_title}' is not active/approved yet -- "
+                      f"skipping index until it is (sync_vector_store will add it once approved).")
+                return
+            department_ids = list(doc_row.departments.values_list('id', flat=True))
+        except Exception as e:
+            print(f"[process_and_add_document] Warning: could not resolve departments for "
+                  f"doc_id={doc_id}, indexing with NO department restriction as a fail-safe "
+                  f"would be unsafe -- aborting index instead: {e}")
+            return
+
         pages = _load_pages(doc_path)
 
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
@@ -73,6 +109,7 @@ def process_and_add_document(doc_path, doc_id, doc_title):
         for chunk in chunks:
             chunk.metadata['doc_id'] = str(doc_id)
             chunk.metadata['doc_title'] = doc_title
+            chunk.metadata['department_ids'] = department_ids
             
         if os.path.exists(FAISS_INDEX_PATH):
             db = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
@@ -82,6 +119,6 @@ def process_and_add_document(doc_path, doc_id, doc_title):
             db = FAISS.from_documents(chunks, embeddings)
             db.save_local(FAISS_INDEX_PATH)
             
-        print(f"✅ Document '{doc_title}' successfully indexed in FAISS!")
+        print(f"✅ Document '{doc_title}' successfully indexed in FAISS! (department_ids={department_ids})")
     except Exception as e:
         print(f"❌ FAISS Indexing failed for '{doc_title}': {e}")

@@ -90,12 +90,24 @@ class ISLChatBotService:
             text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
         return text
 
-    def rebuild_index_from_paths(self, file_paths: list) -> None:
+    def rebuild_index_from_paths(self, docs_info: list) -> None:
         """
-        Department Head ke upload kiye hue (active + approved) PDF documents ki
-        list se FAISS index dobara bana kar memory (self.vector_store) aur disk
-        (faiss_index/) dono par update karta hai. Ye views.py se call hota hai
-        jab bhi koi document upload/activate/deactivate/delete ho.
+        Department Head/Admin ke upload kiye hue (active + approved) documents
+        se FAISS index dobara bana kar memory (self.vector_store) aur disk
+        (faiss_index/) dono par update karta hai. Ye views.py ke
+        sync_vector_store() se call hota hai jab bhi koi document
+        upload/activate/deactivate/delete/approve/reject ho.
+
+        docs_info: list of dicts, one per active+approved Document:
+            {'path': <file path str>, 'doc_id': <id>, 'doc_title': <str>,
+             'department_ids': [<int>, ...]}
+        department_ids=[] means the document has no department restriction
+        (a general/company-wide document, visible to everyone). This is
+        tagged onto every resulting chunk's metadata so
+        _handle_company_query() can filter retrieval results to only what
+        the querying user's department is actually allowed to see --
+        without this, ANY indexed document (e.g. an IT-only document) was
+        searchable by ANY user regardless of department.
 
         Note: Yeh poora index rebuild karta hai (incremental add nahi), taake
         deactivate/delete hone wale documents bhi index se saaf tarah hat jayein.
@@ -103,21 +115,8 @@ class ISLChatBotService:
         documents ki tadaad bohat zyada ho jaye to isay incremental update mein
         badalna zaroori hoga.
         """
-        if not file_paths:
+        if not docs_info:
             # Koi active/approved document nahi bacha, index khali kar dein
-            self.vector_store = None
-            return
-
-        loaded_docs = []
-        for path in file_paths:
-            try:
-                # PyPDFLoader ki jagah apna custom loader use karein
-                loaded_docs.extend(_load_pages(path))
-            except Exception as e:
-                # Ek kharab/corrupt file poore index ko fail na kare
-                print(f"[ISLChatBotService] Warning: could not load '{path}': {e}")
-
-        if not loaded_docs:
             self.vector_store = None
             return
 
@@ -126,9 +125,32 @@ class ISLChatBotService:
             chunk_overlap=200,
             separators=["\n\n", "\n", ".", " ", ""]
         )
-        chunks = text_splitter.split_documents(loaded_docs)
 
-        self.vector_store = FAISS.from_documents(chunks, self.embeddings)
+        all_chunks = []
+        for info in docs_info:
+            path = info.get('path')
+            if not path:
+                continue
+            try:
+                # PyPDFLoader ki jagah apna custom loader use karein
+                pages = _load_pages(path)
+            except Exception as e:
+                # Ek kharab/corrupt file poore index ko fail na kare
+                print(f"[ISLChatBotService] Warning: could not load '{path}': {e}")
+                continue
+
+            doc_chunks = text_splitter.split_documents(pages)
+            for chunk in doc_chunks:
+                chunk.metadata['doc_id'] = str(info.get('doc_id', ''))
+                chunk.metadata['doc_title'] = info.get('doc_title', '')
+                chunk.metadata['department_ids'] = info.get('department_ids', [])
+            all_chunks.extend(doc_chunks)
+
+        if not all_chunks:
+            self.vector_store = None
+            return
+
+        self.vector_store = FAISS.from_documents(all_chunks, self.embeddings)
         self.vector_store.save_local(self.vector_store_path)
 
         try:
@@ -208,23 +230,75 @@ class ISLChatBotService:
         hits = sum(1 for w in words if w in cls._ENGLISH_HINT_WORDS)
         return hits / len(words) >= 0.3
 
-    def _handle_company_query(self, query: str) -> str:
-        """FAISS se data nikal kar RAG ke zariye jawab deta hai"""
+    @staticmethod
+    def _allowed_department_ids(user):
+        """None means unrestricted (Admin/superuser see every department's
+        documents). Otherwise a list containing the user's own department id
+        (or an empty list if they have none) -- used by _doc_chunk_allowed
+        below to filter retrieval results."""
+        if user is None:
+            return None
+        if getattr(user, 'is_superuser', False) or getattr(user, 'role', None) == 'ADMIN':
+            return None
+        dept_id = getattr(user, 'department_id', None)
+        return [dept_id] if dept_id else []
+
+    @staticmethod
+    def _doc_chunk_allowed(chunk_metadata, allowed_dept_ids) -> bool:
+        """Checks a retrieved chunk's department_ids (tagged at index time
+        in rag_utils.py / rebuild_index_from_paths above) against what the
+        querying user is allowed to see."""
+        if allowed_dept_ids is None:
+            return True
+        doc_dept_ids = chunk_metadata.get('department_ids') or []
+        if not doc_dept_ids:
+            return True  # general/company-wide document, no restriction
+        return any(d in allowed_dept_ids for d in doc_dept_ids)
+
+    def _handle_company_query(self, query: str, user=None) -> str:
+        """FAISS se data nikal kar RAG ke zariye jawab deta hai.
+
+        SECURITY: retrieved chunks are filtered to only what the querying
+        user is actually allowed to see (their own department's documents,
+        plus any company-wide documents with no department restriction).
+        Admin/superuser see everything. Without this filter, any indexed
+        document (e.g. one uploaded for IT only) was retrievable in any
+        user's chat answers regardless of their department."""
         if not self.vector_store:
             if self._looks_like_english(query):
                 return ("Sorry, the company knowledge base is currently empty or being "
                          "updated. Please contact the admin.")
             return "Mazrat chahta hoon, company ka knowledge base is waqt khali hai ya update ho raha hai. Baraye meherbani admin se raabta karein."
 
+        allowed_dept_ids = self._allowed_department_ids(user)
+
         # SOLUTION: MMR (Maximal Marginal Relevance) search use karein
-        # Ye pehle top 15 chunks (fetch_k) nikalega, phir unme se 5 sab se 'diverse' 
-        # chunks select karega. Is tarah duplicate documents context window crowding nahi karenge!
-        docs = self.vector_store.max_marginal_relevance_search(
-            query, 
-            k=5,          # AI ko final 5 chunks bhejein
-            fetch_k=15    # Database se pehle 15 nikal kar unme se best 5 diverse chunein
+        # Ye pehle top 40 chunks (fetch_k) nikalega, phir unme se 20 sab se
+        # 'diverse' chunks select karega. Over-fetching (20 instead of the
+        # final 5) so the department filter below still has enough left to
+        # choose from -- if we only pulled 5 upfront and most got filtered
+        # out for department access, we could end up with too little (or
+        # no) context even when relevant, permitted documents exist.
+        candidates = self.vector_store.max_marginal_relevance_search(
+            query,
+            k=20,
+            fetch_k=40,
         )
-        
+
+        docs = [d for d in candidates if self._doc_chunk_allowed(d.metadata, allowed_dept_ids)][:5]
+
+        if not docs:
+            # Matches may exist in the knowledge base, but none are visible
+            # to this user's department -- say so explicitly rather than
+            # silently falling through to a generic "no info" answer that
+            # would look identical to a true no-match case.
+            if self._looks_like_english(query):
+                return ("I couldn't find information on this within your department's "
+                        "accessible documents. Please contact the relevant department or admin.")
+            return ("Mujhe aapke department ke accessible documents mein is baray mein "
+                    "maloomat nahi mili. Baraye meherbani mutaliqa department ya admin se "
+                    "rabta karein.")
+
         context = "\n\n".join([doc.page_content for doc in docs])
 
         rag_prompt = ChatPromptTemplate.from_messages([
@@ -292,19 +366,24 @@ class ISLChatBotService:
         chain = off_topic_prompt | self.llm | StrOutputParser()
         return chain.invoke({"query": query})
 
-    def process_query(self, query: str) -> dict:
+    def process_query(self, query: str, user=None) -> dict:
         """Main Pipeline.
 
         Returns a dict {"answer": str, "intent": str} instead of a bare
         string, so the caller (ChatAskView) knows when to trigger the
         leave-application form on the frontend (intent == 'LEAVE_REQUEST').
+
+        `user` is threaded through to _handle_company_query so retrieval
+        can be filtered to only documents that user's department is
+        allowed to see (see _allowed_department_ids / _doc_chunk_allowed
+        above).
         """
         intent = self._semantic_router(query)
 
         if intent == "LEAVE_REQUEST":
             answer = self._handle_leave_request(query)
         elif intent == "COMPANY":
-            answer = self._handle_company_query(query)
+            answer = self._handle_company_query(query, user)
         elif intent == "GREETING":
             answer = self._handle_greeting(query)
         else:

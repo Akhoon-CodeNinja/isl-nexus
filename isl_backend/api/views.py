@@ -38,14 +38,29 @@ def sync_vector_store():
     Sirf woh documents jo is_active=True hain (aur abhi ke liye sirf PDF,
     kyunke services.py ka loader filhal sirf PDF support karta hai) unke
     file paths se AI ka FAISS index dobara sync karta hai.
+
+    department_ids har document ke sath pass hote hain taake retrieval
+    (services.py::_handle_company_query) query karne wale user ke
+    department ke hisaab se results filter kar sake -- iske bagair koi
+    bhi indexed document kisi bhi user ko (department se qata nazar) chat
+    ke zariye mil sakta tha.
     """
     docs = Document.objects.filter(
         is_active=True,
-    )
-    file_paths = [d.file_url.path for d in docs if d.file_url]
+    ).prefetch_related('departments')
+
+    docs_info = [
+        {
+            'path': d.file_url.path,
+            'doc_id': str(d.id),
+            'doc_title': d.title,
+            'department_ids': list(d.departments.values_list('id', flat=True)),
+        }
+        for d in docs if d.file_url
+    ]
 
     try:
-        chatbot_service.rebuild_index_from_paths(file_paths)
+        chatbot_service.rebuild_index_from_paths(docs_info)
     except Exception as e:
         print(f"[sync_vector_store] Warning: FAISS index rebuild failed: {e}")
 
@@ -129,7 +144,7 @@ class ChatAskView(APIView):
         )
 
         try:
-            result = chatbot_service.process_query(query)
+            result = chatbot_service.process_query(query, user)
             reply = result["answer"]
             intent = result["intent"]
 
@@ -442,6 +457,14 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = User.objects.select_related('department').all().order_by('full_name')
+        requesting_user = self.request.user
+
+        # Department Head sirf apne department ke users dekh/manage kar
+        # sakta hai — ADMIN par ye restriction nahi lagti (Admin sab
+        # departments ke users dekhta hai).
+        if getattr(requesting_user, 'role', None) == 'DEPARTMENT_HEAD':
+            qs = qs.filter(department=requesting_user.department)
+
         params = self.request.query_params
 
         search = params.get('search')
@@ -791,7 +814,25 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 status=http_status.HTTP_400_BAD_REQUEST,
             )
 
-        document.is_active = bool(is_active)
+        is_active = bool(is_active)
+
+        # SECURITY FIX: this endpoint let the uploader flip is_active
+        # directly, completely bypassing the approve()/reject() workflow --
+        # a Worker could upload a document (which perform_create correctly
+        # sets to PENDING/is_active=False) and then immediately call this
+        # endpoint themselves to set is_active=True, making it visible to
+        # every other user (and indexed for the AI chat) without a
+        # Head/Admin ever approving it. Activating is now only allowed once
+        # a document is actually APPROVED; superuser is exempt, same as
+        # approve()/reject() elsewhere. Deactivating an already-approved
+        # document is still allowed (the owner hiding their own live doc).
+        if is_active and not user.is_superuser and document.approval_status != Document.ApprovalStatus.APPROVED:
+            raise PermissionDenied(
+                "This document hasn't been approved yet. It will become visible to "
+                "others automatically once a Department Head or Admin approves it."
+            )
+
+        document.is_active = is_active
         document.save(update_fields=['is_active', 'updated_at'])
         
         action_text = "Activated Document" if document.is_active else "Deactivated Document"
@@ -832,7 +873,22 @@ class DocumentViewSet(viewsets.ModelViewSet):
         document.file_url = new_file
         if SystemSettings.load().enable_document_versioning:
             document.version = _bump_version(document.version)
-        document.approval_status = Document.ApprovalStatus.PENDING
+
+        # SECURITY FIX: this previously only reset approval_status to
+        # PENDING but left is_active untouched -- so if the document was
+        # already approved+active, the swapped-in (not-yet-reviewed) file
+        # stayed visible/searchable to everyone the whole time it was
+        # "pending". Same auto-approve rule as perform_create: a Head/
+        # Admin/superuser's own replacement doesn't need anyone else's
+        # sign-off, so it stays live; anyone else's replacement goes back
+        # to PENDING/is_active=False until re-approved.
+        if user.role in ('DEPARTMENT_HEAD', 'ADMIN') or user.is_superuser:
+            document.approval_status = Document.ApprovalStatus.APPROVED
+            document.is_active = True
+        else:
+            document.approval_status = Document.ApprovalStatus.PENDING
+            document.is_active = False
+
         document.save()
 
         AuditLog.objects.create(
@@ -1184,6 +1240,16 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         qs = AuditLog.objects.select_related('user').all().order_by('-created_at')
+        requesting_user = self.request.user
+
+        # Department Head sirf apne department ke users ki activities
+        # dekh sakta hai — ADMIN par restriction nahi (sab departments).
+        # System-level actions (user=None, e.g. automated jobs) Head ko
+        # nahi dikhte kyunke unka koi department nahi hota — sirf Admin
+        # ko dikhte hain.
+        if getattr(requesting_user, 'role', None) == 'DEPARTMENT_HEAD':
+            qs = qs.filter(user__department=requesting_user.department)
+
         params = self.request.query_params
 
         search = params.get('search')
@@ -1220,8 +1286,15 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     def distinct(self, request):
         field_param = request.query_params.get('field')
         column = 'action' if field_param == 'action' else 'entity_type'
+        qs = AuditLog.objects.select_related('user')
+
+        # Same department scoping as the main queryset, so a Head's
+        # filter dropdown never offers values from other departments.
+        if getattr(request.user, 'role', None) == 'DEPARTMENT_HEAD':
+            qs = qs.filter(user__department=request.user.department)
+
         values = (
-            AuditLog.objects
+            qs
             .order_by()
             .values_list(column, flat=True)
             .distinct()
