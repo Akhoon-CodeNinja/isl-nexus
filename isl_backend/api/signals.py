@@ -23,4 +23,4 @@ def update_faiss_index_on_upload(sender, instance, created, **kwargs):
     # department_ids for every active document (see views.py). That is now
     # the ONLY indexing path -- intentionally a no-op here so a stray
     # pre-M2M index can never be written again.
-    passq
+    pass

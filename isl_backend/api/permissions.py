@@ -26,15 +26,19 @@ class IsAdminOnly(permissions.BasePermission):
             request.user.is_authenticated and
             request.user.role == 'ADMIN'
         )
+
+
+class IsDepartmentHeadOrAdmin(permissions.BasePermission):
     """For endpoints available to Heads -- ADMIN included, since Admin sits
     above Department Head in the role hierarchy and can do everything a
     Head can, plus more (enforced per-view where relevant).
 
     NOTE: not currently imported/used anywhere in views.py -- views.py
     defines its own local IsAdminUser class instead for the same purpose.
-    Left in place rather than deleted since it may be used elsewhere in
-    the project outside this review's file set; if nothing else in the
-    codebase imports it, it's safe to remove.
+    Kept as its own separate class (previously this was accidentally
+    merged into IsAdminOnly's class body as a second has_permission
+    method, which silently overrode the strict ADMIN-only check above --
+    that bug is now fixed).
     """
     def has_permission(self, request, view):
         return bool(
