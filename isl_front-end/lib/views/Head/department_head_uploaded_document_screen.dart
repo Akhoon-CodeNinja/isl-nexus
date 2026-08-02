@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http; // NAYA: HTTP package import kiya gaya
 import 'package:isl_app/core/models/document_models.dart';
 import 'package:isl_app/core/providers/app_state.dart';
 import 'package:isl_app/widgets/Head/department_head_sidebar.dart';
@@ -131,6 +132,64 @@ class _DepartmentHeadUploadedDocumentScreenState
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error opening file: $e')),
+        );
+      }
+    }
+  }
+
+  // NAYA: Delete Document Logic 
+  Future<void> _deleteDocument(String documentId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Document'),
+        content: const Text('Are you sure you want to delete this document? This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false), 
+            child: const Text('Cancel')
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('access_token') ?? prefs.getString('token') ?? '';
+      
+      final url = Uri.parse('http://127.0.0.1:8000/api/documents/$documentId/');
+      
+      final response = await http.delete(
+        url,
+        headers: {
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 204) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Document deleted successfully.'), backgroundColor: Colors.green),
+          );
+          _fetchMyUploads(); // Refresh list after deletion
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to delete document.'), backgroundColor: Colors.red),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
     }
@@ -372,6 +431,12 @@ class _DepartmentHeadUploadedDocumentScreenState
             icon: const Icon(Icons.download_outlined, size: 18),
             onPressed: () => _openFile(doc.id, 'download'),
             tooltip: 'Download',
+          ),
+          // NAYA: Delete Button UI mein add kiya gaya
+          IconButton(
+            icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+            onPressed: () => _deleteDocument(doc.id),
+            tooltip: 'Delete',
           ),
         ],
       ),

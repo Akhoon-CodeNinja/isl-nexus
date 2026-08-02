@@ -797,6 +797,23 @@ class DocumentViewSet(viewsets.ModelViewSet):
         instance.delete()
         sync_vector_store()
 
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def my_uploads(self, request):
+        """
+        NEW: Returns documents uploaded specifically by the logged-in user, 
+        regardless of their is_active or approval_status. Used by the Worker Tracker.
+        """
+        docs = Document.objects.filter(uploaded_by=request.user).order_by('-created_at')
+        
+        search = request.query_params.get('search')
+        if search:
+            docs = docs.filter(
+                Q(title__icontains=search) | Q(doc_number__icontains=search)
+            )
+            
+        serializer = self.get_serializer(docs, many=True)
+        return Response(serializer.data)
+
     @action(detail=True, methods=['patch'], permission_classes=[permissions.IsAuthenticated])
     def status(self, request, pk=None):
         document = self.get_object()
