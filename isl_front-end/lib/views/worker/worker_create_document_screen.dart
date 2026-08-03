@@ -1,11 +1,9 @@
-import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:flutter_quill/flutter_quill.dart' as quill; // Quill Editor Import
@@ -240,11 +238,16 @@ class _WorkerCreateDocumentScreenState extends State<WorkerCreateDocumentScreen>
         )
       );
 
-      // 2. Save PDF to temporary directory
-      final tempDir = await getTemporaryDirectory();
+      // 2. Upload the PDF straight from memory (MultipartFile.fromBytes)
+      // instead of writing it to a temp file first. This previously used
+      // getTemporaryDirectory() (path_provider) + dart:io's File, which
+      // has no implementation on Flutter web -- browsers don't expose a
+      // filesystem temp directory -- and threw MissingPluginException
+      // there. Uploading the bytes directly works the same way on web,
+      // mobile, and desktop, and is simpler besides.
+      final pdfBytes = await pdf.save();
       final safeTitle = _titleCtrl.text.trim().replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
-      final tempFile = File('${tempDir.path}/${safeTitle}_${DateTime.now().millisecondsSinceEpoch}.pdf');
-      await tempFile.writeAsBytes(await pdf.save());
+      final fileName = '${safeTitle}_${DateTime.now().millisecondsSinceEpoch}.pdf';
 
       // 3. Upload exactly like normal file upload
       final prefs = await SharedPreferences.getInstance();
@@ -262,7 +265,9 @@ class _WorkerCreateDocumentScreenState extends State<WorkerCreateDocumentScreen>
         request.fields['tag_ids'] = _selectedCategoryId!;
       }
 
-      request.files.add(await http.MultipartFile.fromPath('file_url', tempFile.path));
+      request.files.add(
+        http.MultipartFile.fromBytes('file_url', pdfBytes, filename: fileName),
+      );
 
       var response = await request.send();
 

@@ -197,9 +197,9 @@ class AppState extends ChangeNotifier {
   }
 
   // --- NAYA FUNCTION: Reject Document Handle Karega ---
-  Future<void> rejectDocument(String id) async {
+  Future<void> rejectDocument(String id, {String? reason}) async {
     try {
-      final updated = await _apiService.rejectDocument(id);
+      final updated = await _apiService.rejectDocument(id, reason: reason);
       _documents = _documents
           .map(
             (d) => d.id == id

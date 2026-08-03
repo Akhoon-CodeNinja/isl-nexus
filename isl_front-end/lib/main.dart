@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_quill/flutter_quill.dart' as quill;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:isl_app/core/constants/app_colors.dart';
 import 'package:isl_app/core/providers/app_state.dart';
@@ -82,6 +84,22 @@ class _ISLAppState extends State<ISLApp> {
         navigatorKey: appNavigatorKey,
         title: 'ISL – Industrial Solutions Ltd.',
         debugShowCheckedModeBanner: false,
+        // flutter_quill's editor/toolbar widgets look up
+        // FlutterQuillLocalizations via the widget tree at build time --
+        // without registering its delegate here (alongside the standard
+        // Material/Widgets/Cupertino ones), any screen using QuillEditor
+        // or QuillSimpleToolbar throws "UnimplementedError:
+        // FlutterQuillLocalizations instance is required and could not
+        // be found" (worker_create_document_screen.dart's editor).
+        localizationsDelegates: const [
+          quill.FlutterQuillLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: const [
+          Locale('en'),
+        ],
         theme: ThemeData(
           useMaterial3: true,
           colorScheme: ColorScheme.fromSeed(

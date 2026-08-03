@@ -92,7 +92,12 @@ class _DepartmentHeadDocumentsScreenState extends State<DepartmentHeadDocumentsS
   }
 
   void _applyFilters() {
-    List<DocumentItem> filtered = List.from(allDocuments);
+    // Rejected documents should disappear from view entirely (both "All
+    // Documents" and "Pending Approval") once the Head rejects them —
+    // the uploader has to resubmit before it's visible here again.
+    List<DocumentItem> filtered = allDocuments
+        .where((doc) => doc.approvalStatus.toUpperCase() != 'REJECTED')
+        .toList();
 
     if (_searchQuery.isNotEmpty) {
       filtered = filtered.where((doc) {
@@ -388,6 +393,168 @@ class _DepartmentHeadDocumentsScreenState extends State<DepartmentHeadDocumentsS
     await _fetchDocuments();
   }
 
+  // NEW: Rejects a pending document via AppState -> ApiService.rejectDocument,
+  // then refreshes the list so it moves out of "Pending Approval".
+  Future<void> _handleReject(DocumentItem doc) async {
+    final reasonCtrl = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reject Document'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Are you sure you want to reject "${doc.title}"? '
+              'The uploader will need to submit it again for it to be reconsidered.',
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: reasonCtrl,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Reason (optional)',
+                hintText: 'e.g. Wrong department, outdated content, needs revision...',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Reject', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    if (!mounted) return;
+
+    final reason = reasonCtrl.text.trim();
+    final appState = context.read<AppState>();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Rejecting "${doc.title}"...')),
+    );
+
+    await appState.rejectDocument(doc.id, reason: reason.isEmpty ? null : reason);
+
+    if (!mounted) return;
+
+    if (appState.error == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('"${doc.title}" rejected.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to reject: ${appState.error}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+
+    await _fetchDocuments();
+  }
+
+  // NEW: Permanently deletes a document via AppState -> ApiService.deleteDocument,
+  // then refreshes the list. Available for any document (pending, approved,
+  // or rejected) -- unlike Approve/Reject this isn't limited to the
+  // Pending Approval workflow.
+  Future<void> _handleDelete(DocumentItem doc) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Document'),
+        content: Text(
+          'Are you sure you want to permanently delete "${doc.title}"? '
+          'This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    if (!mounted) return;
+
+    final appState = context.read<AppState>();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Deleting "${doc.title}"...')),
+    );
+
+    await appState.deleteDocument(doc.id);
+
+    if (!mounted) return;
+
+    if (appState.error == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('"${doc.title}" deleted.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to delete: ${appState.error}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+
+    await _fetchDocuments();
+  }
+
+  // NEW: Toggles a document's active/inactive status via AppState ->
+  // ApiService.toggleDocumentStatus. Only reachable from this Head-only
+  // screen, and the backend now has no restriction on Head/Admin either
+  // way (see views.py DocumentViewSet.status), so this always just works
+  // -- no approval_status check needed here.
+  Future<void> _handleToggleStatus(DocumentItem doc, bool newValue) async {
+    final appState = context.read<AppState>();
+
+    await appState.toggleDocumentStatus(doc.id, newValue);
+
+    if (!mounted) return;
+
+    if (appState.error == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '"${doc.title}" ${newValue ? "activated" : "deactivated"}.',
+          ),
+          backgroundColor: newValue ? Colors.green : Colors.grey.shade700,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to update status: ${appState.error}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+
+    await _fetchDocuments();
+  }
+
   Widget _buildToolbar() {
     return Padding(
       padding: const EdgeInsets.all(16.0),
@@ -603,7 +770,7 @@ class _DepartmentHeadDocumentsScreenState extends State<DepartmentHeadDocumentsS
           ),
           Expanded(flex: 3, child: Text("Uploaded By", style: _headerStyle())),
           Expanded(
-            flex: 4,
+            flex: 5,
             child: Text(
               "Actions",
               style: _headerStyle(),
@@ -844,7 +1011,7 @@ class _DepartmentHeadDocumentsScreenState extends State<DepartmentHeadDocumentsS
           ),
 
           Expanded(
-            flex: 4,
+            flex: 5,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
@@ -935,9 +1102,9 @@ class _DepartmentHeadDocumentsScreenState extends State<DepartmentHeadDocumentsS
                   child: _buildActionIcon(Icons.download_outlined),
                 ),
 
-                // --- APPROVE BUTTON: only shown for documents still
+                // --- APPROVE + REJECT: only shown for documents still
                 // awaiting Head approval ---
-                if (doc.approvalStatus.toUpperCase() == 'PENDING')
+                if (doc.approvalStatus.toUpperCase() == 'PENDING') ...[
                   GestureDetector(
                     onTap: () => _handleApprove(doc),
                     child: Container(
@@ -970,22 +1137,53 @@ class _DepartmentHeadDocumentsScreenState extends State<DepartmentHeadDocumentsS
                         ],
                       ),
                     ),
-                  )
-                else
+                  ),
+                  GestureDetector(
+                    onTap: () => _handleReject(doc),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.red.shade200),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.cancel_outlined,
+                            size: 14,
+                            color: Colors.red.shade700,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Reject',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.red.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ] else
                   Switch(
                     value: doc.isActive,
                     activeColor: Colors.green,
-                    onChanged: (val) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Status cannot be changed from this read-only view.',
-                          ),
-                          backgroundColor: Colors.orange,
-                        ),
-                      );
-                    },
+                    onChanged: (val) => _handleToggleStatus(doc, val),
                   ),
+
+                // --- DELETE: available for any document, regardless of
+                // approval status ---
+                GestureDetector(
+                  onTap: () => _handleDelete(doc),
+                  child: _buildActionIcon(Icons.delete_outline),
+                ),
               ],
             ),
           ),

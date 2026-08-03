@@ -272,8 +272,11 @@ class ApiService {
     return DocumentItem.fromJson(data);
   }
 
-  Future<DocumentItem> rejectDocument(String id) async {
-    final response = await _post('$documents$id/reject/', body: {});
+  Future<DocumentItem> rejectDocument(String id, {String? reason}) async {
+    final response = await _post(
+      '$documents$id/reject/',
+      body: {if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim()},
+    );
     final data = response['data'] as Map<String, dynamic>? ?? {};
     return DocumentItem.fromJson(data);
   }

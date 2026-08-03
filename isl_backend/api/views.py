@@ -819,9 +819,21 @@ class DocumentViewSet(viewsets.ModelViewSet):
         document = self.get_object()
         user = request.user
 
-        if not (user.is_superuser or document.uploaded_by_id == user.id):
+        # Only a Department Head, Admin, or superuser can toggle a
+        # document's active/inactive status -- not even the uploader
+        # themselves anymore. This fully closes the earlier loophole
+        # where a Worker could self-activate their own still-pending
+        # upload (bypassing approve()/reject()): a Worker now has no path
+        # to this endpoint at all, rather than being merely restricted to
+        # approved documents. Head/Admin/superuser have no restriction
+        # either way -- they can freely activate or deactivate any
+        # document regardless of its approval_status.
+        is_privileged = (
+            user.is_superuser or getattr(user, 'role', None) in ('DEPARTMENT_HEAD', 'ADMIN')
+        )
+        if not is_privileged:
             raise PermissionDenied(
-                "Only the user who uploaded this document can change its status."
+                "Only a Department Head or Admin can change a document's status."
             )
 
         is_active = request.data.get('is_active')
@@ -831,25 +843,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 status=http_status.HTTP_400_BAD_REQUEST,
             )
 
-        is_active = bool(is_active)
-
-        # SECURITY FIX: this endpoint let the uploader flip is_active
-        # directly, completely bypassing the approve()/reject() workflow --
-        # a Worker could upload a document (which perform_create correctly
-        # sets to PENDING/is_active=False) and then immediately call this
-        # endpoint themselves to set is_active=True, making it visible to
-        # every other user (and indexed for the AI chat) without a
-        # Head/Admin ever approving it. Activating is now only allowed once
-        # a document is actually APPROVED; superuser is exempt, same as
-        # approve()/reject() elsewhere. Deactivating an already-approved
-        # document is still allowed (the owner hiding their own live doc).
-        if is_active and not user.is_superuser and document.approval_status != Document.ApprovalStatus.APPROVED:
-            raise PermissionDenied(
-                "This document hasn't been approved yet. It will become visible to "
-                "others automatically once a Department Head or Admin approves it."
-            )
-
-        document.is_active = is_active
+        document.is_active = bool(is_active)
         document.save(update_fields=['is_active', 'updated_at'])
         
         action_text = "Activated Document" if document.is_active else "Deactivated Document"
@@ -989,19 +983,46 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 status=http_status.HTTP_400_BAD_REQUEST
             )
 
+        reason = (request.data.get('reason') or '').strip()
+
         document.approval_status = Document.ApprovalStatus.REJECTED
         document.is_active = False
         document.save(update_fields=['approval_status', 'is_active', 'updated_at'])
 
         sync_vector_store()
 
+        # Reason is stored in the audit log entry (free-text) and, if
+        # given, surfaced to the uploader's department via an Alert --
+        # same notification pattern approve() already uses for "New
+        # Document Approved". There's no dedicated rejection_reason field
+        # on Document, so this avoids needing a schema migration for it.
+        action_text = "Rejected Document"
+        if reason:
+            action_text += f": {reason}"
+
         AuditLog.objects.create(
             user=request.user,
-            action="Rejected Document",
+            action=action_text,
             entity_type="Document",
             entity_id=document.id,
             ip_address=get_client_ip(request)
         )
+
+        department = document.departments.first()
+        alert_desc = f"Your document '{document.title}' was not approved."
+        if reason:
+            alert_desc += f" Reason: {reason}"
+        else:
+            alert_desc += " Please contact your Department Head for details."
+
+        Alert.objects.create(
+            title="Document Rejected",
+            description=alert_desc,
+            type=Alert.AlertType.GENERAL,
+            target_department=department,
+            created_by=request.user
+        )
+
         serializer = self.get_serializer(document)
         return Response(serializer.data)
 
@@ -1025,7 +1046,16 @@ class DocumentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], permission_classes=[permissions.AllowAny])
     def view(self, request, pk=None):
         user = self._authenticate_url_token(request)
-        if not SystemSettings.load().enable_file_preview:
+
+        # Head/Admin/superuser always get to preview -- the
+        # enable_file_preview toggle now only restricts Workers. Without
+        # this, the Head who's supposed to review/approve a document
+        # couldn't preview it either whenever an Admin had turned the
+        # toggle off for everyone.
+        is_privileged = (
+            user.is_superuser or getattr(user, 'role', None) in ('DEPARTMENT_HEAD', 'ADMIN')
+        )
+        if not is_privileged and not SystemSettings.load().enable_file_preview:
             raise PermissionDenied(
                 "Inline document preview is currently disabled by the administrator."
             )
