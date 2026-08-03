@@ -179,6 +179,12 @@ CORS_ALLOWED_ORIGINS = config(
 )
 CORS_ALLOW_CREDENTIALS = True
 
+# Dev-only escape hatch. Defaults to False (safe) — never set this True in
+# production; it bypasses CORS_ALLOWED_ORIGINS entirely and lets ANY origin
+# call the API. If you need it locally, set CORS_ALLOW_ALL_ORIGINS=True in
+# your local .env, never in the server's production .env.
+CORS_ALLOW_ALL_ORIGINS = config("CORS_ALLOW_ALL_ORIGINS", default=False, cast=bool)
+
 # ---------------------------------------------------------------------------
 # Logging (baseline — extend per environment)
 # ---------------------------------------------------------------------------
@@ -190,5 +196,3 @@ LOGGING = {
     },
     "root": {"handlers": ["console"], "level": "INFO"},
 }
-
-CORS_ALLOW_ALL_ORIGINS = True
