@@ -72,9 +72,9 @@ class DocumentTagInline(admin.TabularInline):
 class DocumentAdmin(admin.ModelAdmin):
     list_display = (
         "title", "doc_number", "department_list", "file_type", "version",
-        "approval_status", "is_active", "uploaded_by", "created_at",
+        "approval_status", "is_active", "include_in_chatbot", "uploaded_by", "created_at",
     )
-    list_filter = ("departments", "file_type", "approval_status", "is_active")
+    list_filter = ("departments", "file_type", "approval_status", "is_active", "include_in_chatbot")
     search_fields = ("title", "doc_number")
     autocomplete_fields = ("departments", "uploaded_by")
     readonly_fields = ("created_at", "updated_at")

@@ -3,6 +3,7 @@ import 'package:isl_app/core/services/api_service.dart';
 import 'package:isl_app/widgets/Admin/admin_sidebar.dart';
 import 'package:isl_app/widgets/Admin/admin_top_header.dart';
 
+/// Admin screen — compose and broadcast an alert/notification to one or more departments.
 class AdminSendNotificationScreen extends StatefulWidget {
   const AdminSendNotificationScreen({super.key});
 

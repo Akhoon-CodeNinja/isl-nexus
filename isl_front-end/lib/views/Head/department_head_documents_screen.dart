@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// Department Head screen — review, filter, and approve/reject documents submitted for their department. Rejected documents are hidden from view once actioned; the uploader must resubmit.
 class DepartmentHeadDocumentsScreen extends StatefulWidget {
   const DepartmentHeadDocumentsScreen({super.key});
 
@@ -376,7 +377,7 @@ class _DepartmentHeadDocumentsScreenState extends State<DepartmentHeadDocumentsS
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '"${doc.title}" approved — now active and synced to AI knowledge base.',
+            '"${doc.title}" approved and now active.',
           ),
           backgroundColor: Colors.green,
         ),
@@ -547,6 +548,40 @@ class _DepartmentHeadDocumentsScreenState extends State<DepartmentHeadDocumentsS
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to update status: ${appState.error}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+
+    await _fetchDocuments();
+  }
+
+  // NEW: Toggles whether a document is included in the AI chatbot's
+  // knowledge base. Independent of active/inactive status and approval —
+  // this only controls whether the document gets indexed for the chatbot.
+  Future<void> _handleToggleChatbotInclusion(
+    DocumentItem doc,
+    bool newValue,
+  ) async {
+    final appState = context.read<AppState>();
+
+    await appState.toggleChatbotInclusion(doc.id, newValue);
+
+    if (!mounted) return;
+
+    if (appState.error == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '"${doc.title}" ${newValue ? "added to" : "removed from"} AI knowledge base.',
+          ),
+          backgroundColor: newValue ? Colors.green : Colors.grey.shade700,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to update AI inclusion: ${appState.error}'),
           backgroundColor: Colors.red,
         ),
       );
@@ -770,7 +805,7 @@ class _DepartmentHeadDocumentsScreenState extends State<DepartmentHeadDocumentsS
           ),
           Expanded(flex: 3, child: Text("Uploaded By", style: _headerStyle())),
           Expanded(
-            flex: 5,
+            flex: 7,
             child: Text(
               "Actions",
               style: _headerStyle(),
@@ -1011,7 +1046,7 @@ class _DepartmentHeadDocumentsScreenState extends State<DepartmentHeadDocumentsS
           ),
 
           Expanded(
-            flex: 5,
+            flex: 7,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
@@ -1177,6 +1212,53 @@ class _DepartmentHeadDocumentsScreenState extends State<DepartmentHeadDocumentsS
                     activeColor: Colors.green,
                     onChanged: (val) => _handleToggleStatus(doc, val),
                   ),
+
+                // --- AI INCLUSION: opt-in toggle controlling whether this
+                // document is indexed into the chatbot's knowledge base ---
+                GestureDetector(
+                  onTap: () =>
+                      _handleToggleChatbotInclusion(doc, !doc.includeInChatbot),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: doc.includeInChatbot
+                          ? Colors.blue.shade50
+                          : Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: doc.includeInChatbot
+                            ? Colors.blue.shade200
+                            : Colors.grey.shade300,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.smart_toy_outlined,
+                          size: 14,
+                          color: doc.includeInChatbot
+                              ? Colors.blue.shade700
+                              : Colors.grey.shade600,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          doc.includeInChatbot ? 'In AI' : 'Not in AI',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: doc.includeInChatbot
+                                ? Colors.blue.shade700
+                                : Colors.grey.shade600,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
 
                 // --- DELETE: available for any document, regardless of
                 // approval status ---

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http; // NAYA: HTTP package import kiya gaya
 import 'package:isl_app/core/models/document_models.dart';
 import 'package:isl_app/core/providers/app_state.dart';
+import 'package:isl_app/core/services/api_service.dart'; // friendlyApiError() for user-facing error text
 import 'package:isl_app/widgets/Head/department_head_sidebar.dart';
 import 'package:isl_app/widgets/Head/department_head_top_header.dart';
 import 'package:isl_app/views/Head/department_head_upload_document_screen.dart';
@@ -26,6 +27,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 // actions. Uploading a *new* document still happens on the separate
 // "Add Document" screen (DepartmentHeadUploadDocumentScreen).
 // ─────────────────────────────────────────────────────────────────────────────
+/// Department Head screen — list of documents this Head has personally uploaded.
 class DepartmentHeadUploadedDocumentScreen extends StatefulWidget {
   const DepartmentHeadUploadedDocumentScreen({super.key});
 
@@ -131,7 +133,7 @@ class _DepartmentHeadUploadedDocumentScreenState
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error opening file: $e')),
+          SnackBar(content: Text('Error opening file: ${friendlyApiError(e)}')),
         );
       }
     }
@@ -189,7 +191,7 @@ class _DepartmentHeadUploadedDocumentScreenState
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text(friendlyApiError(e)), backgroundColor: Colors.red),
         );
       }
     }

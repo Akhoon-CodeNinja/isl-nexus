@@ -1,8 +1,12 @@
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from .models import Document
-# process_and_add_document import removed -- no longer called from here,
-# see explanation below.
+# process_and_add_document() (and the function itself) has been removed
+# from rag_utils.py entirely -- see the module docstring at the top of
+# api/rag_utils.py for the full history. This signal is kept as an
+# intentional, documented no-op so nobody accidentally re-wires indexing
+# to fire here again.
+
 
 @receiver(post_save, sender=Document)
 def update_faiss_index_on_upload(sender, instance, created, **kwargs):

@@ -15,6 +15,7 @@ import 'package:isl_app/views/Admin/admin_send_notification_screen.dart';
 // Naya AI Assistant chat screen ka import
 import 'package:isl_app/views/Admin/admin_chat_screen.dart';
 
+/// Shared widget (Admin) — main navigation sidebar for the Admin role.
 class AdminSidebar extends StatelessWidget {
   final String activeItem;
 

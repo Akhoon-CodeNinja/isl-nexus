@@ -1,6 +1,9 @@
 import os
+import json
+import shutil
 import datetime
 import re
+from collections import OrderedDict
 from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -14,6 +17,49 @@ from .rag_utils import _load_pages
 load_dotenv()
 
 class ISLChatBotService:
+    """
+    RAG service backed by a SHARDED FAISS knowledge base (one index per
+    department, plus a shared "common" index) instead of one monolithic
+    index. See the shard-management block below for the full design; the
+    short version:
+
+      faiss_index/
+        doc_shard_map.json          <- global doc_id -> shard_key lookup
+        common/                     <- always loaded; docs with 0 or 2+
+                                        linked departments live here
+        dept_<department_id>/       <- docs linked to EXACTLY one
+                                        department; lazy-loaded, LRU-capped
+
+    Only `common/` is unconditionally kept in RAM. Department shards are
+    loaded on first query and evicted (LRU, capped at
+    MAX_LOADED_DEPT_SHARDS) once too many are cached at once -- a Worker's
+    query only ever touches their own department's shard + common, never
+    the other departments' vectors.
+
+    Documents are also no longer indexed just because they're active --
+    see `Document.include_in_chatbot` in models.py / `sync_single_document`
+    in views.py, which gates whether index_document() gets called at all.
+    """
+
+    # Per-shard chunk registry filename: doc_id -> [chunk_id, ...] for the
+    # documents stored IN THAT SHARD. Lets index_document()/remove_document()
+    # touch only the one document that changed, without reprocessing
+    # anything else in the same shard.
+    CHUNK_REGISTRY_FILENAME = "chunk_registry.json"
+
+    # Global (base-level, not per-shard) file: doc_id -> shard_key. Needed
+    # because a document can move between shards over its lifetime (e.g.
+    # its department assignment changes from 1 department to 2, which
+    # moves it from a dept_<id> shard to the common shard) -- without this,
+    # remove_document() wouldn't know which shard's chunks to delete.
+    DOC_SHARD_MAP_FILENAME = "doc_shard_map.json"
+
+    COMMON_SHARD_KEY = "common"
+
+    # Max number of department shards kept loaded in RAM at once (LRU-
+    # evicted beyond this). The common shard is separate and always loaded.
+    MAX_LOADED_DEPT_SHARDS = 10
+
     def __init__(self):
         # Groq API aur LLM initialize karein
         # Zaroori hai k aapne terminal mein export GROQ_API_KEY="your_key" kiya ho
@@ -27,13 +73,192 @@ class ISLChatBotService:
         
         # Local embeddings (Open Source & Free)
         self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-        
-        # FAISS Vector Store load karein (Agar index exist karta hai)
-        self.vector_store_path = "faiss_index"
-        self.vector_store = None
-        if os.path.exists(self.vector_store_path):
-            self.vector_store = FAISS.load_local(self.vector_store_path, self.embeddings, allow_dangerous_deserialization=True)
 
+        # Base directory holding every shard's subfolder + the global
+        # doc_id -> shard_key map.
+        self.base_index_path = "faiss_index"
+
+        # shard_key -> FAISS vector store, for department shards only.
+        # OrderedDict so we can LRU-evict (move_to_end on access, pop the
+        # oldest when over MAX_LOADED_DEPT_SHARDS).
+        self._dept_shard_cache: "OrderedDict[str, FAISS]" = OrderedDict()
+
+        # The common shard is small (only 0-department / multi-department
+        # docs) and needed on nearly every query, so it's kept outside the
+        # LRU entirely and loaded eagerly here rather than lazily.
+        self._common_store = self._load_shard_from_disk(self.COMMON_SHARD_KEY)
+
+        # shard_key -> {doc_id: [chunk_id, ...]}. Kept fully in memory
+        # (these are small JSON dicts, unlike the FAISS vector stores) so
+        # registry lookups never depend on which shards are LRU-loaded.
+        self._shard_registries: dict = {}
+
+        # doc_id (str) -> shard_key, persisted at the base level.
+        self._doc_shard_map: dict = self._load_doc_shard_map()
+
+    # -------------------------------------------------------------------
+    # Shard path / key helpers
+    # -------------------------------------------------------------------
+    def _shard_dir(self, shard_key: str) -> str:
+        return os.path.join(self.base_index_path, shard_key)
+
+    @staticmethod
+    def _shard_key_for_department_ids(department_ids) -> str:
+        """Docs linked to EXACTLY one department get their own shard.
+        Docs with no department restriction (company-wide) OR linked to
+        multiple departments at once go into the shared 'common' shard --
+        this avoids duplicating a multi-department doc's chunks across
+        several department shards."""
+        department_ids = department_ids or []
+        if len(department_ids) == 1:
+            return f"dept_{department_ids[0]}"
+        return ISLChatBotService.COMMON_SHARD_KEY
+
+    def _shard_keys_for_query(self, user) -> list:
+        """Which shard(s) a given user's query should search.
+        Worker: their own department's shard + common.
+        Admin/superuser: common + every dept_* shard that exists on disk
+        (per the confirmed design, an Admin query loads whatever isn't
+        already cached rather than skipping uncached shards)."""
+        allowed_dept_ids = self._allowed_department_ids(user)
+
+        if allowed_dept_ids is None:  # Admin / superuser: everything
+            keys = [self.COMMON_SHARD_KEY]
+            if os.path.isdir(self.base_index_path):
+                for name in sorted(os.listdir(self.base_index_path)):
+                    full = os.path.join(self.base_index_path, name)
+                    if name.startswith("dept_") and os.path.isdir(full):
+                        keys.append(name)
+            return keys
+
+        keys = [self.COMMON_SHARD_KEY]
+        for dept_id in allowed_dept_ids:
+            if dept_id:
+                keys.append(f"dept_{dept_id}")
+        return keys
+
+    # -------------------------------------------------------------------
+    # Shard loading / LRU cache
+    # -------------------------------------------------------------------
+    def _load_shard_from_disk(self, shard_key: str):
+        """Returns a loaded FAISS store for this shard, or None if the
+        shard doesn't exist on disk yet (e.g. no document has ever landed
+        in that department's shard)."""
+        shard_dir = self._shard_dir(shard_key)
+        if not os.path.exists(os.path.join(shard_dir, "index.faiss")):
+            return None
+        try:
+            return FAISS.load_local(shard_dir, self.embeddings, allow_dangerous_deserialization=True)
+        except Exception as e:
+            print(f"[ISLChatBotService] Warning: could not load shard '{shard_key}': {e}")
+            return None
+
+    def _cache_dept_shard(self, shard_key: str, store) -> None:
+        self._dept_shard_cache[shard_key] = store
+        self._dept_shard_cache.move_to_end(shard_key)
+        # Evict least-recently-used dept shards beyond the cap. This is
+        # purely a RAM-cache eviction -- the shard's data is already
+        # persisted on disk, so evicting here just drops the in-memory
+        # FAISS object; the next query that needs it lazy-loads it again.
+        while len(self._dept_shard_cache) > self.MAX_LOADED_DEPT_SHARDS:
+            self._dept_shard_cache.popitem(last=False)
+
+    def _get_shard(self, shard_key: str):
+        """Returns the shard's FAISS store, lazy-loading (and LRU-caching,
+        for department shards) from disk if needed. None if the shard has
+        no documents yet."""
+        if shard_key == self.COMMON_SHARD_KEY:
+            return self._common_store
+
+        if shard_key in self._dept_shard_cache:
+            self._dept_shard_cache.move_to_end(shard_key)
+            return self._dept_shard_cache[shard_key]
+
+        store = self._load_shard_from_disk(shard_key)
+        if store is not None:
+            self._cache_dept_shard(shard_key, store)
+        return store
+
+    def _set_shard(self, shard_key: str, store) -> None:
+        """Registers a freshly created (or just-modified) shard's vector
+        store in the right cache slot."""
+        if shard_key == self.COMMON_SHARD_KEY:
+            self._common_store = store
+        else:
+            self._cache_dept_shard(shard_key, store)
+
+    def _save_shard(self, shard_key: str) -> None:
+        shard_dir = self._shard_dir(shard_key)
+        os.makedirs(shard_dir, exist_ok=True)
+        store = self._get_shard(shard_key)
+        if store is not None:
+            store.save_local(shard_dir)
+        registry = self._shard_registries.get(shard_key, {})
+        try:
+            with open(os.path.join(shard_dir, self.CHUNK_REGISTRY_FILENAME), "w", encoding="utf-8") as f:
+                json.dump(registry, f)
+        except Exception as e:
+            print(f"[ISLChatBotService] Warning: could not save registry for shard '{shard_key}': {e}")
+
+    # -------------------------------------------------------------------
+    # Per-shard chunk registry (doc_id -> chunk_ids within that shard)
+    # -------------------------------------------------------------------
+    def _get_shard_registry(self, shard_key: str) -> dict:
+        if shard_key not in self._shard_registries:
+            path = os.path.join(self._shard_dir(shard_key), self.CHUNK_REGISTRY_FILENAME)
+            if os.path.exists(path):
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        self._shard_registries[shard_key] = json.load(f)
+                except Exception as e:
+                    print(f"[ISLChatBotService] Warning: could not load registry for "
+                          f"shard '{shard_key}', starting empty: {e}")
+                    self._shard_registries[shard_key] = {}
+            else:
+                self._shard_registries[shard_key] = {}
+        return self._shard_registries[shard_key]
+
+    # -------------------------------------------------------------------
+    # Global doc_id -> shard_key map persistence
+    # -------------------------------------------------------------------
+    def _doc_shard_map_path(self) -> str:
+        return os.path.join(self.base_index_path, self.DOC_SHARD_MAP_FILENAME)
+
+    def _load_doc_shard_map(self) -> dict:
+        path = self._doc_shard_map_path()
+        if not os.path.exists(path):
+            return {}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"[ISLChatBotService] Warning: could not load doc_shard_map, "
+                  f"starting empty (a full resync will rebuild it correctly): {e}")
+            return {}
+
+    def _save_doc_shard_map(self) -> None:
+        os.makedirs(self.base_index_path, exist_ok=True)
+        try:
+            with open(self._doc_shard_map_path(), "w", encoding="utf-8") as f:
+                json.dump(self._doc_shard_map, f)
+        except Exception as e:
+            print(f"[ISLChatBotService] Warning: could not save doc_shard_map: {e}")
+
+    def _wipe_all_shards(self) -> None:
+        """Used only by rebuild_index_from_paths (full/bulk rebuild) --
+        clears every shard on disk and in memory so it can be rebuilt from
+        scratch, cleanly (no leftover documents from before)."""
+        if os.path.isdir(self.base_index_path):
+            shutil.rmtree(self.base_index_path)
+        os.makedirs(self.base_index_path, exist_ok=True)
+        self._common_store = None
+        self._dept_shard_cache = OrderedDict()
+        self._shard_registries = {}
+        self._doc_shard_map = {}
+
+    # -------------------------------------------------------------------
+    # Language rule (unchanged)
+    # -------------------------------------------------------------------
     # Har prompt ke sath yeh common language rule attach hota hai. Rule ab
     # user ki apni query ki language MIRROR karta hai (English sawal ->
     # English jawab, Urdu/Roman Urdu sawal -> Roman Urdu jawab) -- sirf
@@ -92,74 +317,134 @@ class ISLChatBotService:
 
     def rebuild_index_from_paths(self, docs_info: list) -> None:
         """
-        Department Head/Admin ke upload kiye hue (active + approved) documents
-        se FAISS index dobara bana kar memory (self.vector_store) aur disk
-        (faiss_index/) dono par update karta hai. Ye views.py ke
-        sync_vector_store() se call hota hai jab bhi koi document
-        upload/activate/deactivate/delete/approve/reject ho.
+        Full/bulk (re)index of every given (active + include_in_chatbot)
+        document, from scratch. Wipes every shard first, then re-adds each
+        document via `index_document()` so it lands in the correct shard
+        (department-specific or common) based on its department_ids.
 
-        docs_info: list of dicts, one per active+approved Document:
-            {'path': <file path str>, 'doc_id': <id>, 'doc_title': <str>,
-             'department_ids': [<int>, ...]}
-        department_ids=[] means the document has no department restriction
-        (a general/company-wide document, visible to everyone). This is
-        tagged onto every resulting chunk's metadata so
-        _handle_company_query() can filter retrieval results to only what
-        the querying user's department is actually allowed to see --
-        without this, ANY indexed document (e.g. an IT-only document) was
-        searchable by ANY user regardless of department.
+        docs_info: list of dicts, one per active+include_in_chatbot
+        Document: {'path': <file path str>, 'doc_id': <id>,
+                   'doc_title': <str>, 'department_ids': [<int>, ...]}
 
-        Note: Yeh poora index rebuild karta hai (incremental add nahi), taake
-        deactivate/delete hone wale documents bhi index se saaf tarah hat jayein.
-        Chotay/medium document counts (kuch sau tak) ke liye ye theek hai; agar
-        documents ki tadaad bohat zyada ho jaye to isay incremental update mein
-        badalna zaroori hoga.
+        Used only for bulk/initial backfill (the `sync_faiss_index`
+        management command) and as a manual escape hatch if any shard's
+        registry / doc_shard_map ever drifts out of sync and needs a
+        clean, from-scratch rebuild. Per-document actions (upload,
+        activate/deactivate, chatbot-inclusion toggle, approve/reject,
+        replace, delete) call the targeted `index_document()` /
+        `remove_document()` methods below instead, so a single document
+        change doesn't touch any other document's shard.
         """
+        self._wipe_all_shards()
+
         if not docs_info:
-            # Koi active/approved document nahi bacha, index khali kar dein
-            self.vector_store = None
             return
 
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200,
-            separators=["\n\n", "\n", ".", " ", ""]
-        )
-
-        all_chunks = []
         for info in docs_info:
-            path = info.get('path')
+            path = info.get("path")
             if not path:
                 continue
-            try:
-                # PyPDFLoader ki jagah apna custom loader use karein
-                pages = _load_pages(path)
-            except Exception as e:
-                # Ek kharab/corrupt file poore index ko fail na kare
-                print(f"[ISLChatBotService] Warning: could not load '{path}': {e}")
-                continue
-
-            doc_chunks = text_splitter.split_documents(pages)
-            for chunk in doc_chunks:
-                chunk.metadata['doc_id'] = str(info.get('doc_id', ''))
-                chunk.metadata['doc_title'] = info.get('doc_title', '')
-                chunk.metadata['department_ids'] = info.get('department_ids', [])
-            all_chunks.extend(doc_chunks)
-
-        if not all_chunks:
-            self.vector_store = None
-            return
-
-        self.vector_store = FAISS.from_documents(all_chunks, self.embeddings)
-        self.vector_store.save_local(self.vector_store_path)
+            self.index_document(
+                doc_id=info.get("doc_id", ""),
+                doc_title=info.get("doc_title", ""),
+                department_ids=info.get("department_ids", []),
+                path=path,
+            )
 
         try:
-            timestamp_file = os.path.join(self.vector_store_path, "sync_timestamp.txt")
+            timestamp_file = os.path.join(self.base_index_path, "sync_timestamp.txt")
             with open(timestamp_file, "w") as f:
                 f.write(datetime.datetime.now().isoformat())
         except Exception as e:
             print(f"[ISLChatBotService] Warning: could not save sync timestamp: {e}")
 
+    # -------------------------------------------------------------------
+    # Targeted (incremental) indexing -- touches only the ONE shard that
+    # the changed document belongs to.
+    # -------------------------------------------------------------------
+    def index_document(self, doc_id, doc_title, department_ids, path) -> bool:
+        """(Re-)adds ONE document's chunks to its shard (a single-
+        department shard, or 'common' for company-wide / multi-department
+        docs -- see `_shard_key_for_department_ids`). Safe to call for a
+        document that's already indexed, including if its department
+        assignment changed since -- its old chunks are removed first
+        (from whichever shard they were in, via doc_shard_map), so this
+        also serves as the "update"/"move" path. Returns True on success."""
+        doc_id = str(doc_id)
+        department_ids = department_ids or []
+        new_shard_key = self._shard_key_for_department_ids(department_ids)
+
+        # Drop any existing chunks for this doc_id first (from whichever
+        # shard it's currently in -- may differ from new_shard_key if the
+        # document's departments changed), so replacing a file or moving
+        # it between shards doesn't leave stale chunks behind.
+        self.remove_document(doc_id, _skip_save=True)
+
+        try:
+            pages = _load_pages(path)
+        except Exception as e:
+            print(f"[ISLChatBotService.index_document] Could not load '{path}': {e}")
+            return False
+
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000, chunk_overlap=200, separators=["\n\n", "\n", ".", " ", ""],
+        )
+        chunks = text_splitter.split_documents(pages)
+        if not chunks:
+            self._save_doc_shard_map()
+            return False
+
+        for chunk in chunks:
+            chunk.metadata['doc_id'] = doc_id
+            chunk.metadata['doc_title'] = doc_title
+            chunk.metadata['department_ids'] = department_ids
+
+        store = self._get_shard(new_shard_key)
+        if store is None:
+            store = FAISS.from_documents(chunks, self.embeddings)
+            # FAISS.from_documents doesn't hand back ids directly; read
+            # them off the freshly-built docstore instead.
+            new_ids = list(store.docstore._dict.keys())
+            self._set_shard(new_shard_key, store)
+        else:
+            new_ids = store.add_documents(chunks)
+
+        registry = self._get_shard_registry(new_shard_key)
+        registry[doc_id] = [str(i) for i in new_ids]
+        self._doc_shard_map[doc_id] = new_shard_key
+
+        self._save_shard(new_shard_key)
+        self._save_doc_shard_map()
+        return True
+
+    def remove_document(self, doc_id, _skip_save: bool = False) -> bool:
+        """Removes ONE document's chunks from its shard (looked up via
+        doc_shard_map), without touching any other shard or any other
+        document's vectors. Safe no-op if the doc was never indexed (e.g.
+        rejecting a still-PENDING document, or one with
+        include_in_chatbot=False)."""
+        doc_id = str(doc_id)
+        shard_key = self._doc_shard_map.get(doc_id)
+        if shard_key is None:
+            return False
+
+        registry = self._get_shard_registry(shard_key)
+        chunk_ids = registry.pop(doc_id, None)
+        store = self._get_shard(shard_key)
+
+        if chunk_ids and store is not None:
+            try:
+                store.delete(ids=chunk_ids)
+            except Exception as e:
+                print(f"[ISLChatBotService.remove_document] Could not delete chunks "
+                      f"for doc_id={doc_id} in shard '{shard_key}': {e}")
+
+        self._doc_shard_map.pop(doc_id, None)
+
+        if not _skip_save:
+            self._save_shard(shard_key)
+            self._save_doc_shard_map()
+        return bool(chunk_ids)
 
     def _semantic_router(self, query: str) -> str:
         """Query ka intent samajhta hai: LEAVE_REQUEST, COMPANY, GREETING ya OFF_TOPIC"""
@@ -258,32 +543,44 @@ class ISLChatBotService:
     def _handle_company_query(self, query: str, user=None) -> str:
         """FAISS se data nikal kar RAG ke zariye jawab deta hai.
 
-        SECURITY: retrieved chunks are filtered to only what the querying
-        user is actually allowed to see (their own department's documents,
-        plus any company-wide documents with no department restriction).
-        Admin/superuser see everything. Without this filter, any indexed
-        document (e.g. one uploaded for IT only) was retrievable in any
-        user's chat answers regardless of their department."""
-        if not self.vector_store:
+        Retrieval is now SHARDED by department (see the shard-management
+        block above `_semantic_router`): a Worker's query only ever loads
+        their own department's shard + the always-loaded common shard, so
+        a single query never has to touch the other departments' vectors
+        at all. An Admin query loads every shard (lazy-loading any that
+        aren't currently cached) since Admin can see everything.
+
+        SECURITY: even though shards already scope most of this, a chunk
+        in the common shard can still belong to a *subset* of departments
+        (e.g. a 2-department document) that doesn't include this user's
+        own department -- so the metadata filter below stays as the final
+        per-chunk check regardless of which shard(s) were searched.
+        Admin/superuser see everything."""
+        allowed_dept_ids = self._allowed_department_ids(user)
+        shard_keys = self._shard_keys_for_query(user)
+
+        candidates = []
+        for shard_key in shard_keys:
+            store = self._get_shard(shard_key)
+            if store is None:
+                continue
+            # Over-fetch per shard (k=10, fetch_k=20) so the department
+            # filter below still has enough candidates left to choose
+            # from after combining every searched shard's results --
+            # mirrors the same over-fetch reasoning the old single-index
+            # search used (there it was k=20/fetch_k=40 against one
+            # index; here it's a smaller budget per shard since results
+            # from multiple shards get merged together below).
+            try:
+                candidates.extend(store.max_marginal_relevance_search(query, k=10, fetch_k=20))
+            except Exception as e:
+                print(f"[ISLChatBotService._handle_company_query] Shard '{shard_key}' search failed: {e}")
+
+        if not candidates:
             if self._looks_like_english(query):
                 return ("Sorry, the company knowledge base is currently empty or being "
                          "updated. Please contact the admin.")
             return "Mazrat chahta hoon, company ka knowledge base is waqt khali hai ya update ho raha hai. Baraye meherbani admin se raabta karein."
-
-        allowed_dept_ids = self._allowed_department_ids(user)
-
-        # SOLUTION: MMR (Maximal Marginal Relevance) search use karein
-        # Ye pehle top 40 chunks (fetch_k) nikalega, phir unme se 20 sab se
-        # 'diverse' chunks select karega. Over-fetching (20 instead of the
-        # final 5) so the department filter below still has enough left to
-        # choose from -- if we only pulled 5 upfront and most got filtered
-        # out for department access, we could end up with too little (or
-        # no) context even when relevant, permitted documents exist.
-        candidates = self.vector_store.max_marginal_relevance_search(
-            query,
-            k=20,
-            fetch_k=40,
-        )
 
         docs = [d for d in candidates if self._doc_chunk_allowed(d.metadata, allowed_dept_ids)][:5]
 

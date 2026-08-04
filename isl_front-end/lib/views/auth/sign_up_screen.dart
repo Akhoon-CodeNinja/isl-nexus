@@ -4,6 +4,7 @@ import 'package:isl_app/views/auth/verification_screen.dart';
 import 'package:isl_app/services/auth_service.dart';
 import 'package:isl_app/core/services/api_service.dart'; // Ensure ApiService is imported
 
+/// Auth screen — new user registration form.
 class SignUpScreen extends StatefulWidget {
   const SignUpScreen({super.key});
 

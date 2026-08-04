@@ -4,6 +4,7 @@ import 'package:isl_app/widgets/Admin/admin_sidebar.dart';
 import 'package:isl_app/widgets/Admin/admin_top_header.dart';
 
 // --- DATA MODEL ---
+/// Admin screen — manage reusable notification templates (title/body/type) used when sending alerts.
 class TemplateModel {
   final String id;
   final String title;
@@ -60,7 +61,7 @@ class _AdminNotificationTemplatesScreenState extends State<AdminNotificationTemp
 
       setState(() { templatesList = items; _loading = false; });
     } catch (e) {
-      setState(() { _error = e.toString(); _loading = false; });
+      setState(() { _error = friendlyApiError(e); _loading = false; });
     }
   }
 

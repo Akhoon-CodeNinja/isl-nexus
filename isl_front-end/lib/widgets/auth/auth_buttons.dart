@@ -34,6 +34,7 @@ import 'package:isl_app/core/constants/app_colors.dart';
 //   • elevation: 0 + shadowColor: transparent → flat design (no drop-shadow)
 //     The button relies on its solid background colour for visual weight.
 // ─────────────────────────────────────────────────────────────────────────────
+/// Shared widget — reusable styled buttons used across the auth screens.
 class PrimaryButton extends StatelessWidget {
   const PrimaryButton({
     super.key,

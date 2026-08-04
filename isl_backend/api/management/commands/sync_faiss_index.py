@@ -1,10 +1,13 @@
 """
 Management command: sync_faiss_index
 
-Existing (pehle se database mein maujood) active documents ko FAISS index
-mein sync karne ke liye. Ye zaroori hai un documents ke liye jo naye
-sync_vector_store() fix se pehle upload huay thay, kyunke wo fix sirf
-future ke upload/status-toggle/replace/delete actions par chalta hai.
+Existing (pehle se database mein maujood) active + AI-chatbot-enabled
+documents ko sharded FAISS index (`faiss_index/dept_<id>/` +
+`faiss_index/common/`, see services.py) mein backfill/rebuild karne ke
+liye. Har document `Document.include_in_chatbot=True` hona chahiye taake
+ye is command se pick ho -- documents jo sirf read/download ke liye hain
+(include_in_chatbot=False, jo NAYA DEFAULT hai) is index mein kabhi nahi
+jaate, chahe wo active kyun na hon.
 
 Usage:
     python manage.py sync_faiss_index
@@ -22,22 +25,29 @@ from api.views import sync_vector_store
 
 
 class Command(BaseCommand):
-    help = "Backfill: existing active PDF documents ko FAISS index mein sync karta hai."
+    help = ("Backfill/rebuild: existing active + include_in_chatbot=True documents ko "
+            "sharded FAISS index mein sync karta hai.")
 
     def handle(self, *args, **kwargs):
         active_docs = Document.objects.filter(
             is_active=True,
-            file_type=Document.FileType.PDF,
+            include_in_chatbot=True,
         )
         count = active_docs.count()
 
         if count == 0:
             self.stdout.write(self.style.WARNING(
-                "Koi active PDF document nahi mila. Kuch bhi sync nahi hoga."
+                "Koi active + 'include_in_chatbot=True' document nahi mila. Kuch bhi "
+                "sync nahi hoga. (Yaad rahe: include_in_chatbot ka default False hai -- "
+                "Department Head ya Admin ko har relevant document par ye flag on karna "
+                "hoga pehle.)"
             ))
             return
 
-        self.stdout.write(f"{count} active PDF document(s) mile. Index rebuild ho raha hai...")
+        self.stdout.write(
+            f"{count} active + chatbot-enabled document(s) mile. Sharded index rebuild "
+            f"ho raha hai (department-wise + common shard)..."
+        )
 
         try:
             sync_vector_store()
@@ -46,5 +56,5 @@ class Command(BaseCommand):
             return
 
         self.stdout.write(self.style.SUCCESS(
-            f"Successfully synced! {count} document(s) ab AI ke FAISS index mein maujood hain."
+            f"Successfully synced! {count} document(s) ab AI ke sharded FAISS index mein maujood hain."
         ))

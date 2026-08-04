@@ -185,6 +185,25 @@ CORS_ALLOW_CREDENTIALS = True
 # your local .env, never in the server's production .env.
 CORS_ALLOW_ALL_ORIGINS = config("CORS_ALLOW_ALL_ORIGINS", default=False, cast=bool)
 
+# Dev-only escape hatch #2, narrower than CORS_ALLOW_ALL_ORIGINS above.
+# `flutter run -d chrome` serves the app on a random localhost port every
+# run (localhost:52431, localhost:58213, ...), so a fixed
+# CORS_ALLOWED_ORIGINS entry never matches and every request gets stuck at
+# the OPTIONS preflight (the browser never sends the real POST/GET).
+# Setting CORS_ALLOW_LOCALHOST_ANY_PORT=True in your LOCAL .env only allows
+# any http(s)://localhost:<port> or http(s)://127.0.0.1:<port> origin,
+# instead of opening the API to every origin on the internet the way
+# CORS_ALLOW_ALL_ORIGINS does. Defaults to False. Never set this True in a
+# production .env.
+CORS_ALLOW_LOCALHOST_ANY_PORT = config(
+    "CORS_ALLOW_LOCALHOST_ANY_PORT", default=False, cast=bool
+)
+if CORS_ALLOW_LOCALHOST_ANY_PORT:
+    CORS_ALLOWED_ORIGIN_REGEXES = [
+        r"^https?://localhost:\d+$",
+        r"^https?://127\.0\.0\.1:\d+$",
+    ]
+
 # ---------------------------------------------------------------------------
 # Logging (baseline — extend per environment)
 # ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 // The parent screen provides [activeIndex], [unreadAlerts], and an [onTap] 
 // callback so navigation logic stays in the screen, not the widget.
 // ─────────────────────────────────────────────────────────────────────────────
+/// Shared widget (Worker) — bottom navigation bar for the Worker role.
 class WorkerBottomNav extends StatelessWidget {
   const WorkerBottomNav({
     super.key,

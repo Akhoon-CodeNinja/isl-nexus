@@ -19,6 +19,7 @@ import 'package:isl_app/views/worker/worker_edit_profile_screen.dart';
 // rather than a made-up number; add a phone field server-side if you
 // want it to be real.
 // ─────────────────────────────────────────────────────────────────────────────
+/// Worker screen — view their profile information.
 class WorkerProfileScreen extends StatefulWidget {
   const WorkerProfileScreen({super.key});
 

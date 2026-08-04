@@ -3,6 +3,7 @@ import 'package:isl_app/core/services/api_service.dart';
 import 'package:isl_app/widgets/Head/department_head_sidebar.dart';
 import 'package:isl_app/widgets/Head/department_head_top_header.dart';
 
+/// Department Head screen — send an alert/notification to their department.
 class DepartmentHeadSendNotificationScreen extends StatefulWidget {
   const DepartmentHeadSendNotificationScreen({super.key});
 

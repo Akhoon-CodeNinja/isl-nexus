@@ -6,3 +6,22 @@ django-cors-headers>=4.4,<4.5
 django-filter>=24.2,<24.3
 python-decouple>=3.8,<3.9
 Pillow
+requests>=2.31
+
+# --- AI / RAG chatbot stack (api/services.py, api/rag_utils.py) ---
+# Without these, `python manage.py runserver` fails at import time on
+# `from .services import ISLChatBotService` in api/views.py.
+python-dotenv>=1.0
+langchain>=0.2,<0.4
+langchain-core>=0.2
+langchain-community>=0.2
+langchain-text-splitters>=0.2
+langchain-groq>=0.1
+langchain-huggingface>=0.0.3
+faiss-cpu>=1.8
+sentence-transformers>=2.7   # backs HuggingFaceEmbeddings
+pypdf>=4.0                   # backs PyPDFLoader (PDF documents)
+docx2txt>=0.8                # backs Docx2txtLoader (DOCX documents)
+pandas>=2.0                  # Excel (XLSX/XLS) sheet parsing in rag_utils.py
+openpyxl>=3.1                # pandas' .xlsx engine
+xlrd>=2.0                    # pandas' legacy .xls engine

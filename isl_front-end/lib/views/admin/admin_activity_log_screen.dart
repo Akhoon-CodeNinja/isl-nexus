@@ -5,6 +5,7 @@ import 'package:isl_app/widgets/Admin/admin_sidebar.dart';
 import 'package:isl_app/widgets/Admin/admin_top_header.dart';
 
 // --- DATA MODEL ---
+/// Admin screen — browse and filter the system-wide audit log (who did what, on which module, and when) across all departments.
 class ActivityModel {
   final String id;
   final String time;
@@ -297,7 +298,7 @@ class _AdminActivityLogScreenState extends State<AdminActivityLogScreen> {
       });
     } catch (e) {
       setState(() {
-        _error = e.toString().replaceAll("Exception: ", ""); // API error capture
+        _error = friendlyApiError(e); // API error capture
         _loading = false;
       });
     }

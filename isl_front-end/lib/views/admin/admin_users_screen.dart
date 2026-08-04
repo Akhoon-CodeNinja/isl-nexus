@@ -4,6 +4,7 @@ import 'package:isl_app/widgets/Admin/admin_sidebar.dart';
 import 'package:isl_app/widgets/Admin/admin_top_header.dart';
 
 // --- DATA MODEL ---
+/// Admin screen — manage user accounts: role assignment, department, per-user AI chat limit override, activation.
 class UserModel {
   final String id;
   final String name;
@@ -116,7 +117,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
 
       setState(() { usersList = items; _loading = false; });
     } catch (e) {
-      setState(() { _error = e.toString(); _loading = false; });
+      setState(() { _error = friendlyApiError(e); _loading = false; });
     }
   }
 
@@ -209,7 +210,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                     _fetchUsers();
                   } catch (e) {
                     setDialogState(() => saving = false);
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceAll('Exception: ', '')), backgroundColor: Colors.red));
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyApiError(e)), backgroundColor: Colors.red));
                   }
                 }
               },
@@ -247,7 +248,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Role updated'), backgroundColor: Colors.green));
                 _fetchUsers();
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString()), backgroundColor: Colors.red));
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyApiError(e)), backgroundColor: Colors.red));
               }
             },
             child: const Text("Update", style: TextStyle(color: Colors.white)),
@@ -284,7 +285,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Chat limit updated'), backgroundColor: Colors.green));
                 _fetchUsers();
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString()), backgroundColor: Colors.red));
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyApiError(e)), backgroundColor: Colors.red));
               }
             },
             child: const Text("Save", style: TextStyle(color: Colors.white)),
@@ -305,7 +306,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: ${friendlyApiError(e)}'), backgroundColor: Colors.red));
       }
     }
   }

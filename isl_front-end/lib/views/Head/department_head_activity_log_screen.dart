@@ -5,6 +5,7 @@ import 'package:isl_app/widgets/Head/department_head_sidebar.dart';
 import 'package:isl_app/widgets/Head/department_head_top_header.dart';
 
 // --- DATA MODEL ---
+/// Department Head screen — audit log filtered to this Head's own department.
 class ActivityModel {
   final String id;
   final String time;
@@ -297,7 +298,7 @@ class _DepartmentHeadActivityLogScreenState extends State<DepartmentHeadActivity
       });
     } catch (e) {
       setState(() {
-        _error = e.toString().replaceAll("Exception: ", ""); // API error capture
+        _error = friendlyApiError(e); // API error capture
         _loading = false;
       });
     }

@@ -14,6 +14,7 @@ import 'package:isl_app/views/Head/department_head_send_notification_screen.dart
 // Naya AI Assistant chat screen ka import
 import 'package:isl_app/views/Head/department_head_chat_screen.dart';
 
+/// Shared widget (Department Head) — main navigation sidebar for the Department Head role.
 class DepartmentHeadSidebar extends StatelessWidget {
   final String activeItem;
 

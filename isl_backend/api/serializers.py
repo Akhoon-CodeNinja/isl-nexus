@@ -116,7 +116,7 @@ class DocumentSerializer(serializers.ModelSerializer):
         model = Document
         fields = [
             'id', 'title', 'doc_number', 'file_url', 'file_type', 'version', 
-            'approval_status', 'is_active', 'created_at', 'updated_at',
+            'approval_status', 'is_active', 'include_in_chatbot', 'created_at', 'updated_at',
             'uploaded_by', 'uploaded_by_details', 
             'departments_details',
             'tags', 'tags_details'
@@ -124,6 +124,11 @@ class DocumentSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'uploaded_by': {'write_only': True, 'required': False},
             'is_active': {'read_only': True}, # NAYA CHANGE: User upload time is_active set nahi kar sakta
+            # Read-only here on purpose: this is exposed for display, but can
+            # only be changed via the dedicated `chatbot_inclusion` action
+            # below (Department Head / Admin only), not via a plain
+            # create/update call -- see DocumentViewSet.chatbot_inclusion.
+            'include_in_chatbot': {'read_only': True},
         }
 
 class AlertSerializer(serializers.ModelSerializer):

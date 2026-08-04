@@ -8,6 +8,7 @@ import 'package:isl_app/core/services/api_service.dart';
 // Backend scopes /api/chat/history/ to request.user, so this can never
 // show another user's messages.
 // ─────────────────────────────────────────────────────────────────────────────
+/// Worker screen — past AI Assistant chat sessions.
 class WorkerChatHistoryScreen extends StatefulWidget {
   const WorkerChatHistoryScreen({super.key, this.sessionId, this.title});
 

@@ -25,6 +25,7 @@ import 'package:isl_app/widgets/Admin/admin_top_header.dart';
 // Visual pass only (Jul 2026): grouped sections, icon-tagged rows, and
 // a dirty-state save bar. No new fields, no API shape changes.
 // ─────────────────────────────────────────────────────────────────────────────
+/// Admin screen — configure platform-wide System Settings (download permission, preview toggle, default page size, versioning behaviour).
 class AdminSettingsScreen extends StatefulWidget {
   const AdminSettingsScreen({super.key});
 
@@ -121,7 +122,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
       final data = await _api.fetchSettings();
       _applyServerData(data);
     } catch (e) {
-      setState(() => _loadError = e.toString());
+      setState(() => _loadError = friendlyApiError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -190,7 +191,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to save settings: $e'),
+          content: Text('Failed to save settings: ${friendlyApiError(e)}'),
           backgroundColor: const Color(0xFFB91C1C),
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(

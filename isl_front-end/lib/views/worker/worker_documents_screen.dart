@@ -21,6 +21,7 @@ import 'package:isl_app/views/worker/worker_create_document_screen.dart'; // NAY
 // ─────────────────────────────────────────────────────────────────────────────
 // WORKER DOCUMENTS SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
+/// Worker screen — browse active/approved documents for their department.
 class WorkerDocumentsScreen extends StatefulWidget {
   const WorkerDocumentsScreen({super.key});
 

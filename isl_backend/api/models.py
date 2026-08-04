@@ -259,6 +259,24 @@ class Document(UUIDModel):
     )
     is_active = models.BooleanField(default=False, db_index=True)
 
+    # Whether this document should be embedded/indexed into the AI
+    # chatbot's FAISS knowledge base at all. Most uploaded documents
+    # (forms, certificates, misc scans) are only ever needed for
+    # reading/download, not for chatbot retrieval -- indexing every
+    # active document regardless wastes vector-store memory and adds
+    # retrieval noise. Defaults to False: a document is only searchable
+    # by the AI assistant once a Department Head or Admin explicitly
+    # opts it in (see DocumentViewSet.chatbot_inclusion in views.py).
+    # `is_active` still independently controls read/download visibility.
+    include_in_chatbot = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="If True, this document's content is embedded into the AI "
+                   "chatbot's searchable knowledge base. If False, it's still "
+                   "readable/downloadable normally but never surfaced in AI "
+                   "chat answers. Settable by a Department Head or Admin only.",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 

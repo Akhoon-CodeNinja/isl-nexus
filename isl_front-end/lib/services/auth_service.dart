@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 
+/// Thin auth helper used by the auth screens; wraps ApiService for login/session convenience calls.
 class ApiException implements Exception {
   final String message;
   ApiException(this.message);

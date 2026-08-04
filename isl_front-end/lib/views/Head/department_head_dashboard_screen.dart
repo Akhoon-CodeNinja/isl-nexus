@@ -14,6 +14,7 @@ import 'package:isl_app/views/Head/department_head_users_screen.dart';
 import 'package:isl_app/widgets/Head/department_head_sidebar.dart';
 import 'package:isl_app/widgets/Head/department_head_top_header.dart';
 
+/// Department Head home screen — stats for their department (pending approvals, documents, activity).
 class DepartmentHeadDashboardScreen extends StatefulWidget {
   const DepartmentHeadDashboardScreen({super.key});
 

@@ -10,6 +10,7 @@ import 'package:isl_app/core/services/api_service.dart';
 // (MeSerializer marks them read_only) and here in the UI, so the form
 // doesn't offer fields the API would silently ignore anyway.
 // ─────────────────────────────────────────────────────────────────────────────
+/// Worker screen — edit their own profile details.
 class WorkerEditProfileScreen extends StatefulWidget {
   const WorkerEditProfileScreen({super.key, required this.profile});
   final UserProfile profile;

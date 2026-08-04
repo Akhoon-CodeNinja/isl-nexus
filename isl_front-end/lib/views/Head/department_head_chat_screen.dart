@@ -39,6 +39,7 @@ import 'package:isl_app/widgets/worker/worker_ai_mascot.dart';
 //     these via a hardcoded http://127.0.0.1:8000 URL, which wouldn't work
 //     in production anyway -- worth fixing there too, separately).
 // ─────────────────────────────────────────────────────────────────────────────
+/// Department Head screen — AI Assistant chat interface.
 class DepartmentHeadChatScreen extends StatefulWidget {
   const DepartmentHeadChatScreen({super.key});
 

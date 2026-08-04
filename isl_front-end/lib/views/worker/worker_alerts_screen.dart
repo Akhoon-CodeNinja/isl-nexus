@@ -21,6 +21,7 @@ import 'package:isl_app/views/worker/worker_profile_screen.dart';
 // null i.e. a company-wide broadcast), so no additional department
 // filtering is needed or applied client-side here.
 // ─────────────────────────────────────────────────────────────────────────────
+/// Worker screen — view alerts/notifications addressed to them or their department.
 class WorkerAlertsScreen extends StatefulWidget {
   const WorkerAlertsScreen({super.key});
 

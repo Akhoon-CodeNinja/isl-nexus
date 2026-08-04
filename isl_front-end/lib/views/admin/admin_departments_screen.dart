@@ -5,6 +5,7 @@ import 'package:isl_app/widgets/Admin/admin_sidebar.dart';
 import 'package:isl_app/widgets/Admin/admin_top_header.dart';
 
 // --- DATA MODEL ---
+/// Admin screen — create, edit, and activate/deactivate departments used across documents, users, and alerts.
 class DepartmentModel {
   final String id;
   final String name;
@@ -105,7 +106,7 @@ class _AdminDepartmentsScreenState extends State<AdminDepartmentsScreen> {
 
       setState(() { departmentsList = items; _loading = false; });
     } catch (e) {
-      setState(() { _error = e.toString(); _loading = false; });
+      setState(() { _error = friendlyApiError(e); _loading = false; });
     }
   }
 

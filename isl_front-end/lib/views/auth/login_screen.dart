@@ -14,6 +14,7 @@ import 'package:isl_app/widgets/auth/auth_text_field.dart';
 import 'package:isl_app/widgets/auth/auth_buttons.dart';
 import 'package:isl_app/core/utils/globals.dart';
 
+/// Auth screen — employee-ID/password login, plus the Microsoft SSO entry point.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -97,9 +98,18 @@ class _LoginScreenState extends State<LoginScreen> {
       await appState.logout();
       if (!mounted) return;
       setState(() => _loading = false);
+      // The credentials themselves were correct — the user just has the
+      // wrong tab selected (e.g. a Department Head trying to sign in from
+      // the Worker tab). Say that plainly instead of "invalid credentials",
+      // which reads as a wrong password and sends people down the wrong
+      // troubleshooting path.
+      final correctTab = isStaffRole ? 'Department Head / Admin' : 'Worker';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Invalid credentials. Please select the correct role.'),
+          content: Text(
+            'Wrong tab selected. This account is a $correctTab account — '
+            'please switch to the "$correctTab" tab and sign in again.',
+          ),
           backgroundColor: Colors.red.shade600,
         ),
       );

@@ -6,8 +6,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:isl_app/widgets/Head/department_head_sidebar.dart';
 import 'package:isl_app/widgets/Head/department_head_top_header.dart';
 import 'package:isl_app/views/Head/department_head_documents_screen.dart'; 
+import 'package:isl_app/core/services/api_service.dart'; // friendlyApiError() for user-facing error text
 import 'package:isl_app/views/worker/worker_documents_screen.dart';
 
+/// Department Head screen — upload a document directly (skips the worker approval step).
 class DepartmentHeadUploadDocumentScreen extends StatefulWidget {
   const DepartmentHeadUploadDocumentScreen({super.key});
 
@@ -266,7 +268,7 @@ class _DepartmentHeadUploadDocumentScreenState extends State<DepartmentHeadUploa
     } catch (e, stack) {
       debugPrint('UPLOAD ERROR: $e');
       debugPrint('$stack');
-      _showSnackBar("Upload error: $e", isError: true);
+      _showSnackBar("Upload error: ${friendlyApiError(e)}", isError: true);
     } finally {
       if (mounted) setState(() => _isUploading = false);
     }
@@ -343,7 +345,7 @@ class _DepartmentHeadUploadDocumentScreenState extends State<DepartmentHeadUploa
         _showSnackBar("Could not add category: ${res.body}", isError: true);
       }
     } catch (e) {
-      _showSnackBar("Error adding category: $e", isError: true);
+      _showSnackBar("Error adding category: ${friendlyApiError(e)}", isError: true);
     }
   }
 

@@ -26,6 +26,7 @@ import 'package:flutter/material.dart';
 
 enum MascotState { idle, userTyping, thinking, speaking, happy, error }
 
+/// Shared widget (Worker) — animated AI assistant mascot shown on Worker screens.
 class AiMascotAvatar extends StatefulWidget {
   const AiMascotAvatar({
     super.key,

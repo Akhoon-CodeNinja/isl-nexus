@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:isl_app/views/auth/login_screen.dart'; // Ensure correct path
 
+/// Auth screen — final step of the sign-up/verification flow, confirming account setup is complete.
 class CompleteScreen extends StatelessWidget {
   const CompleteScreen({
     super.key,

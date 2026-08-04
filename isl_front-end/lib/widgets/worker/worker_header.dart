@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 // Shared dark-blue header used across all Worker screens.
 // Fetches real user data from SharedPreferences.
 // ─────────────────────────────────────────────────────────────────────────────
+/// Shared widget (Worker) — top header for Worker screens.
 class WorkerHeader extends StatefulWidget {
   const WorkerHeader({super.key, this.onMenuTap});
 

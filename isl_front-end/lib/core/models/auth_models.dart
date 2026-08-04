@@ -1,3 +1,4 @@
+/// Data models — auth session, user profile, and related auth payloads returned by the API.
 class AuthSession {
   const AuthSession({
     required this.token,

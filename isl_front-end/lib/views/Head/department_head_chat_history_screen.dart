@@ -20,6 +20,7 @@ import 'package:isl_app/widgets/worker/worker_ai_mascot.dart';
 // AiMascotAvatar (idle) instead of a static icon, to match the mascot
 // already wired into DepartmentHeadChatScreen's own bubbles.
 // ─────────────────────────────────────────────────────────────────────────────
+/// Department Head screen — past AI Assistant chat sessions.
 class DepartmentHeadChatHistoryScreen extends StatefulWidget {
   const DepartmentHeadChatHistoryScreen({super.key, this.sessionId, this.title});
 

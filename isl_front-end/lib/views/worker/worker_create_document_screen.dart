@@ -9,6 +9,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:flutter_quill/flutter_quill.dart' as quill; // Quill Editor Import
 
 import 'package:isl_app/core/providers/app_state.dart';
+import 'package:isl_app/core/services/api_service.dart'; // friendlyApiError() for user-facing error text
 import 'package:isl_app/views/worker/worker_documents_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -17,6 +18,7 @@ import 'package:isl_app/views/worker/worker_documents_screen.dart';
 // Allows workers to type a document directly in the app using a rich text
 // editor (flutter_quill) that looks like MS Word.
 // ─────────────────────────────────────────────────────────────────────────────
+/// Worker screen — compose a new document with a rich-text editor and generate a PDF for submission.
 class WorkerCreateDocumentScreen extends StatefulWidget {
   const WorkerCreateDocumentScreen({super.key});
 
@@ -281,7 +283,7 @@ class _WorkerCreateDocumentScreenState extends State<WorkerCreateDocumentScreen>
         _showSnackBar("Failed to upload: $resBody", isError: true);
       }
     } catch (e) {
-      _showSnackBar("Error generating document: $e", isError: true);
+      _showSnackBar("Error generating document: ${friendlyApiError(e)}", isError: true);
     } finally {
       if (mounted) setState(() => _isUploading = false);
     }

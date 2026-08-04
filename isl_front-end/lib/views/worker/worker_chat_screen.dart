@@ -18,6 +18,7 @@ import 'package:isl_app/core/services/api_service.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 // WORKER CHAT SCREEN (Dynamic Quick Help & API Ready)
 // ─────────────────────────────────────────────────────────────────────────────
+/// Worker screen — AI Assistant chat interface, limited to the worker's daily message quota.
 class WorkerChatScreen extends StatefulWidget {
   const WorkerChatScreen({super.key});
 

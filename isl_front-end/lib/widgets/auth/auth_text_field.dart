@@ -31,6 +31,7 @@ import 'package:isl_app/core/constants/app_colors.dart';
 //   All mutable values (controller text, obscureText) are controlled by the
 //   parent widget and passed in as constructor parameters.
 // ─────────────────────────────────────────────────────────────────────────────
+/// Shared widget — reusable styled text input used across the auth screens.
 class AuthTextField extends StatelessWidget {
   const AuthTextField({
     super.key,

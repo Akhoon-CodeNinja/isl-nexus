@@ -7,6 +7,13 @@ import 'package:http/http.dart' as http;
 import 'package:isl_app/core/models/auth_models.dart';
 import 'package:isl_app/core/models/document_models.dart';
 
+/// Thin HTTP client wrapping every backend REST endpoint the app calls.
+///
+/// All requests go through `_request()`, which centralizes: auth headers,
+/// timeouts, JSON encode/decode, automatic access-token refresh on a 401,
+/// and turning any failure into a clean `Exception('...')` message that's
+/// already safe to show to the user (see `friendlyApiError()` below —
+/// screens should use that instead of `error.toString()`).
 class ApiService {
   ApiService({http.Client? client}) : _client = client ?? http.Client();
 
@@ -106,13 +113,25 @@ class ApiService {
 
   // --- AUTHENTICATION & PROFILE ---
   Future<AuthSession> login({required String identifier, required String password}) async {
-    final response = await _post(
-      authLogin,
-      body: {'employee_id': identifier, 'password': password},
-      auth: false,
-    );
-    final data = response['data'] as Map<String, dynamic>? ?? {};
-    return AuthSession.fromJson(data);
+    try {
+      final response = await _post(
+        authLogin,
+        body: {'employee_id': identifier, 'password': password},
+        auth: false,
+      );
+      final data = response['data'] as Map<String, dynamic>? ?? {};
+      return AuthSession.fromJson(data);
+    } catch (e) {
+      // The backend (SimpleJWT) doesn't say whether the ID or the password
+      // was wrong — by design, so it can't be used to guess valid employee
+      // IDs. Normalize its generic message into one clear, professional
+      // message for the login screen.
+      final msg = friendlyApiError(e).toLowerCase();
+      if (msg.contains('no active account') || msg.contains('unable to log in')) {
+        throw Exception('Incorrect employee ID or password. Please try again.');
+      }
+      rethrow;
+    }
   }
 
   Future<Map<String, dynamic>> loginWithMicrosoftToken(String token) async {
@@ -262,6 +281,15 @@ class ApiService {
 
   Future<DocumentItem> toggleDocumentStatus(String id, bool active) async {
     final response = await _patch('$documents$id/status/', body: {'is_active': active});
+    final data = response['data'] as Map<String, dynamic>? ?? {};
+    return DocumentItem.fromJson(data);
+  }
+
+  Future<DocumentItem> toggleChatbotInclusion(String id, bool include) async {
+    final response = await _patch(
+      '$documents$id/chatbot_inclusion/',
+      body: {'include_in_chatbot': include},
+    );
     final data = response['data'] as Map<String, dynamic>? ?? {};
     return DocumentItem.fromJson(data);
   }
@@ -449,6 +477,13 @@ class ApiService {
     return _request('DELETE', path, auth: auth);
   }
 
+  /// Performs a single HTTP call and normalizes the outcome:
+  /// - 2xx → returns the decoded JSON body wrapped as `{'data': ...}`
+  /// - 401 → tries one silent token refresh + retry; if that also fails,
+  ///   clears the session and throws a "please sign in again" message
+  /// - any other failure → throws a short, user-safe `Exception` (network
+  ///   issues, timeouts, and server-provided error messages are all mapped
+  ///   here, see the `catch` clauses and `_extractErrorMessage` below)
   Future<Map<String, dynamic>> _request(String method, String path, {Map<String, dynamic>? body, Map<String, String>? query, bool auth = true, bool isRetry = false}) async {
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
     final headers = await _headers(auth: auth);
@@ -482,12 +517,20 @@ class ApiService {
     }
 
     if (response.statusCode == 401) {
-      if (!isRetry && auth) {
-        final refreshed = await _attemptTokenRefresh();
-        if (refreshed) return _request(method, path, body: body, query: query, auth: auth, isRetry: true);
+      // Only authenticated requests (a Bearer token was sent) mean an
+      // expired/invalid session. For unauthenticated requests — the login
+      // call itself — a 401 means "wrong employee ID or password", not a
+      // session problem, so fall through and surface the real backend
+      // message instead of clearing a session that never existed.
+      if (auth) {
+        if (!isRetry) {
+          final refreshed = await _attemptTokenRefresh();
+          if (refreshed) return _request(method, path, body: body, query: query, auth: auth, isRetry: true);
+        }
+        await clearSession();
+        throw Exception('Session expired. Please sign in again.');
       }
-      await clearSession();
-      throw Exception('Session expired. Please sign in again.');
+      throw Exception(_extractErrorMessage(response));
     }
 
     throw Exception(_extractErrorMessage(response));
@@ -521,6 +564,11 @@ class ApiService {
     }
   }
 
+  /// Pulls a human-readable message out of a non-2xx response body.
+  /// Tries, in order: `message`, `detail`, then the first field-validation
+  /// error (e.g. `{"title": ["This field is required."]}`). Falls back to a
+  /// generic "Request failed (&lt;status&gt;)." if the body isn't JSON or
+  /// doesn't match any of those shapes.
   String _extractErrorMessage(http.Response response) {
     try {
       final bodyText = response.body.isEmpty ? '{}' : response.body;
@@ -538,6 +586,26 @@ class ApiService {
   }
 }
 
+/// Converts any caught error/exception into a short, professional message
+/// that is safe to show directly to the user in a SnackBar or inline error
+/// text. ApiService already throws clean `Exception('...')` messages for
+/// network/auth/server failures (see `_request` above), so this mainly
+/// strips Dart's "Exception: " wrapper. It also guards against:
+///  - double-wrapped exceptions (e.g. "Exception: Exception: ...")
+///  - empty/blank messages
+///  - raw stack-trace-looking text accidentally passed in
+/// Always use this instead of `error.toString()` when showing an error to
+/// the user — never surface raw exception/stack-trace text in the UI.
 String friendlyApiError(Object error) {
-  return error.toString().replaceFirst('Exception: ', '');
+  var msg = error.toString();
+  // Unwrap repeated "Exception: " prefixes (can happen when an error is
+  // caught and rethrown as a new Exception further up the call stack).
+  while (msg.startsWith('Exception: ')) {
+    msg = msg.substring('Exception: '.length);
+  }
+  msg = msg.trim();
+  if (msg.isEmpty || msg.contains('#0 ') || msg.length > 200) {
+    return 'Something went wrong. Please try again.';
+  }
+  return msg;
 }

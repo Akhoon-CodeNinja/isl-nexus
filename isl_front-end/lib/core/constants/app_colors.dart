@@ -25,6 +25,7 @@
 
 import 'package:flutter/material.dart';
 
+/// App-wide colour palette used for consistent theming across all screens.
 class AppColors {
   // Private constructor – this class must never be instantiated.
   // All colours are accessed as static constants: AppColors.primary

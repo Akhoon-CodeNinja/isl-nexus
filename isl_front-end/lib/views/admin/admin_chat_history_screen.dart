@@ -20,6 +20,7 @@ import 'package:isl_app/widgets/worker/worker_ai_mascot.dart';
 // AiMascotAvatar (idle) instead of a static icon, to match the mascot
 // already wired into AdminChatScreen's own bubbles.
 // ─────────────────────────────────────────────────────────────────────────────
+/// Admin screen — view past AI Assistant chat sessions and their messages.
 class AdminChatHistoryScreen extends StatefulWidget {
   const AdminChatHistoryScreen({super.key, this.sessionId, this.title});
 

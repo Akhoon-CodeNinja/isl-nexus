@@ -14,6 +14,7 @@ import 'package:isl_app/views/Admin/admin_users_screen.dart';
 import 'package:isl_app/widgets/Admin/admin_sidebar.dart';
 import 'package:isl_app/widgets/Admin/admin_top_header.dart';
 
+/// Admin home screen — high-level stats (documents, users, audit activity, sync status) across the whole platform.
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
 

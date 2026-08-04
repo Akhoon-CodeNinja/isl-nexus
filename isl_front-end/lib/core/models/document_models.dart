@@ -1,3 +1,4 @@
+/// Data models — DocumentItem, AlertItem, QuickHelpItem, and related document/alert payloads returned by the API.
 class DocumentItem {
   DocumentItem({
     required this.id,
@@ -15,6 +16,7 @@ class DocumentItem {
     required this.status,
     required this.url,
     required this.approvalStatus, // Naya field
+    this.includeInChatbot = false,
     this.isSelected = false,
   });
 
@@ -33,6 +35,7 @@ class DocumentItem {
   final String status;
   final String url;
   final String approvalStatus; // Naya field
+  final bool includeInChatbot;
   bool isSelected;
 
   static bool _parseBool(dynamic v) {
@@ -95,6 +98,7 @@ class DocumentItem {
       status: active ? 'active' : 'inactive',
       url: (json['file_url'] ?? json['url'] ?? '').toString(),
       approvalStatus: (json['approval_status'] ?? 'PENDING').toString(), // Parsing
+      includeInChatbot: _parseBool(json['include_in_chatbot']),
       isSelected: false,
     );
   }

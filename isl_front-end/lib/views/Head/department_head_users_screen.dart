@@ -4,6 +4,7 @@ import 'package:isl_app/widgets/Head/department_head_sidebar.dart';
 import 'package:isl_app/widgets/Head/department_head_top_header.dart';
 
 // --- DATA MODEL ---
+/// Department Head screen — manage users within their own department (role/access, not full Admin control).
 class UserModel {
   final String id;
   final String name;
@@ -115,7 +116,7 @@ class _DepartmentHeadUsersScreenState extends State<DepartmentHeadUsersScreen> {
       });
     } catch (e) {
       setState(() {
-        _error = e.toString();
+        _error = friendlyApiError(e);
         _loading = false;
       });
     }
@@ -142,7 +143,7 @@ class _DepartmentHeadUsersScreenState extends State<DepartmentHeadUsersScreen> {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update access: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('Failed to update access: ${friendlyApiError(e)}'), backgroundColor: Colors.red),
         );
       }
     }

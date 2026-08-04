@@ -1,16 +1,40 @@
+"""
+Document-loading helpers for the RAG pipeline.
+
+This module intentionally owns ONLY file parsing (`_load_pages`). Indexing
+itself (chunking, embedding, and writing to the FAISS store) lives in
+`services.py::ISLChatBotService.rebuild_index_from_paths`, which is the
+single, authoritative indexing path called from `views.py::sync_vector_store`
+every time a document is uploaded/approved/activated/deactivated/deleted.
+
+History: this file used to also define `process_and_add_document()`, wired
+up to a `post_save` signal on `Document` (see `signals.py`), plus its own
+module-level `HuggingFaceEmbeddings` instance to support it. That path was
+removed for two reasons:
+  1. Correctness/security -- `post_save` fires *during* `serializer.save()`,
+     before the view's very next line (`doc.departments.set(...)`) has run,
+     so the document always got indexed with `department_ids=[]` -- which
+     is treated as "no restriction", making it retrievable by chat users in
+     ANY department regardless of which department(s) it actually belonged
+     to.
+  2. Redundancy -- `sync_vector_store()` already performs a full, correctly
+     ordered rebuild via `rebuild_index_from_paths()` immediately after the
+     M2M `departments` is set, making the signal-driven path unnecessary.
+Keeping a second, unused `HuggingFaceEmbeddings` model loaded at import time
+just to back dead code wasted RAM and slowed every server start, so it was
+removed along with the dead function. `signals.py` documents the same
+history from the indexing side.
+"""
+
 import os
 import pandas as pd
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
-from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.documents import Document as LangchainDocument
 
-# FAISS index kahan save hoga 
+# Directory where the FAISS index (index.faiss + index.pkl) is persisted.
 FAISS_INDEX_PATH = "faiss_index"
 
-# Embedding model
-embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 def _load_pages(doc_path):
     """
@@ -62,63 +86,3 @@ def _load_pages(doc_path):
             return []
 
     raise ValueError(f"Unsupported file type for indexing: '{ext}'")
-
-def process_and_add_document(doc_path, doc_id, doc_title):
-    try:
-        # SECURITY FIX: this function runs from a post_save signal on
-        # every Document save, which previously meant a document could
-        # get indexed (and become searchable via chat by ANY user,
-        # regardless of department) the instant it was uploaded --
-        # before a Head/Admin ever approved it. It also never recorded
-        # which department(s) a document belongs to, so once indexed a
-        # document was retrievable by every user regardless of role or
-        # department.
-        #
-        # Both are fixed here: (1) look up the actual Document row and
-        # skip indexing entirely if it isn't active yet (sync_vector_store
-        # in views.py will pick it up for real once it's approved+active),
-        # and (2) tag every chunk with the department(s) it belongs to, so
-        # retrieval (services.py::_handle_company_query) can filter results
-        # to only what the querying user is actually allowed to see. An
-        # empty department_ids list means "no department restriction" (a
-        # general/company-wide document), visible to everyone -- same
-        # convention as target_department=None elsewhere in this codebase.
-        department_ids = []
-        try:
-            from .models import Document as DocumentModel
-            doc_row = DocumentModel.objects.filter(id=doc_id).first()
-            if doc_row is None:
-                print(f"[process_and_add_document] doc_id={doc_id} not found, skipping index.")
-                return
-            if not doc_row.is_active:
-                print(f"[process_and_add_document] '{doc_title}' is not active/approved yet -- "
-                      f"skipping index until it is (sync_vector_store will add it once approved).")
-                return
-            department_ids = list(doc_row.departments.values_list('id', flat=True))
-        except Exception as e:
-            print(f"[process_and_add_document] Warning: could not resolve departments for "
-                  f"doc_id={doc_id}, indexing with NO department restriction as a fail-safe "
-                  f"would be unsafe -- aborting index instead: {e}")
-            return
-
-        pages = _load_pages(doc_path)
-
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
-        chunks = text_splitter.split_documents(pages)
-        
-        for chunk in chunks:
-            chunk.metadata['doc_id'] = str(doc_id)
-            chunk.metadata['doc_title'] = doc_title
-            chunk.metadata['department_ids'] = department_ids
-            
-        if os.path.exists(FAISS_INDEX_PATH):
-            db = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
-            db.add_documents(chunks)
-            db.save_local(FAISS_INDEX_PATH)
-        else:
-            db = FAISS.from_documents(chunks, embeddings)
-            db.save_local(FAISS_INDEX_PATH)
-            
-        print(f"✅ Document '{doc_title}' successfully indexed in FAISS! (department_ids={department_ids})")
-    except Exception as e:
-        print(f"❌ FAISS Indexing failed for '{doc_title}': {e}")

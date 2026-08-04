@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:isl_app/services/auth_service.dart';
 import 'package:isl_app/views/auth/complete_screen.dart';
 
+/// Auth screen — OTP/verification step during sign-up.
 class VerificationScreen extends StatefulWidget {
   const VerificationScreen({
     super.key,

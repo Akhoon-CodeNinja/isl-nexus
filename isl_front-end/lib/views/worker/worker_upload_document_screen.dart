@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import 'package:isl_app/core/providers/app_state.dart';
+import 'package:isl_app/core/services/api_service.dart'; // friendlyApiError() for user-facing error text
 import 'package:isl_app/views/worker/worker_documents_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -28,6 +29,7 @@ import 'package:isl_app/views/worker/worker_documents_screen.dart';
 // itself gated on `canManageDocs` / DEPARTMENT_HEAD (see
 // WorkerDocumentsScreen._canUpload), so no extra role check is done here.
 // ─────────────────────────────────────────────────────────────────────────────
+/// Worker screen — upload a document file for Department Head approval.
 class WorkerUploadDocumentScreen extends StatefulWidget {
   const WorkerUploadDocumentScreen({super.key});
 
@@ -293,7 +295,7 @@ class _WorkerUploadDocumentScreenState
         _showSnackBar("Could not add category: ${res.body}", isError: true);
       }
     } catch (e) {
-      _showSnackBar("Error adding category: $e", isError: true);
+      _showSnackBar("Error adding category: ${friendlyApiError(e)}", isError: true);
     }
   }
 
@@ -386,7 +388,7 @@ class _WorkerUploadDocumentScreenState
     } catch (e, stack) {
       debugPrint('WORKER UPLOAD ERROR: $e');
       debugPrint('$stack');
-      _showSnackBar("Upload error: $e", isError: true);
+      _showSnackBar("Upload error: ${friendlyApiError(e)}", isError: true);
     } finally {
       if (mounted) setState(() => _isUploading = false);
     }

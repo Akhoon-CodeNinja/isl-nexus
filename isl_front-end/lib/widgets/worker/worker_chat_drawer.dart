@@ -13,6 +13,7 @@ import 'package:isl_app/core/services/api_service.dart';
 // signed-in user server-side, so a worker can only ever see their own past
 // chats here.
 // ─────────────────────────────────────────────────────────────────────────────
+/// Shared widget (Worker) — slide-out drawer listing AI Assistant chat sessions for quick switching.
 class WorkerChatDrawer extends StatefulWidget {
   const WorkerChatDrawer({
     super.key,

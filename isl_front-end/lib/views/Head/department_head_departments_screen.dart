@@ -5,6 +5,7 @@ import 'package:isl_app/widgets/Head/department_head_sidebar.dart';
 import 'package:isl_app/widgets/Head/department_head_top_header.dart';
 
 // --- DATA MODEL ---
+/// Department Head screen — view department info relevant to this Head.
 class DepartmentModel {
   final String id;
   final String name;
@@ -132,7 +133,7 @@ class _DepartmentHeadDepartmentsScreenState extends State<DepartmentHeadDepartme
       });
     } catch (e) {
       setState(() {
-        _error = e.toString();
+        _error = friendlyApiError(e);
         _loading = false;
       });
     }

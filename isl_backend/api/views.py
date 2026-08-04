@@ -10,12 +10,20 @@ from django.db.models import Q, Exists, OuterRef, Count
 from django.http import FileResponse, Http404
 from django.utils import timezone
 from datetime import timedelta
+import logging
 import os
 import requests
 import mimetypes
 from rest_framework.response import Response
 from rest_framework import status as http_status
 from rest_framework.decorators import action
+
+# Server-side logger for this app. Exceptions caught in views below are
+# logged here (with full traceback via logger.exception) instead of being
+# forwarded as raw text in API responses -- see LOGGING in settings.py for
+# where this ends up (console by default; point the "console" handler at a
+# file/log-aggregator in production).
+logger = logging.getLogger(__name__)
 
 from .models import Department, Document, Tag, Alert, ChatSession, ChatMessage, UserAlertRead, AuditLog, SystemSettings, NotificationTemplate
 from .serializers import (
@@ -35,18 +43,23 @@ chatbot_service = ISLChatBotService()
 
 def sync_vector_store():
     """
-    Sirf woh documents jo is_active=True hain (aur abhi ke liye sirf PDF,
-    kyunke services.py ka loader filhal sirf PDF support karta hai) unke
-    file paths se AI ka FAISS index dobara sync karta hai.
+    Full FAISS rebuild: sab is_active=True documents ko dobara parse +
+    chunk + embed karke poora index naye sire se banata hai.
 
-    department_ids har document ke sath pass hote hain taake retrieval
-    (services.py::_handle_company_query) query karne wale user ke
-    department ke hisaab se results filter kar sake -- iske bagair koi
-    bhi indexed document kisi bhi user ko (department se qata nazar) chat
-    ke zariye mil sakta tha.
+    NOTE: individual document actions (upload/activate/deactivate/
+    approve/reject/replace/delete) no longer call this -- they call
+    `sync_single_document()` below instead, which only touches the ONE
+    document that changed via `ISLChatBotService.index_document()` /
+    `remove_document()` (a doc_id -> chunk_ids registry/hash-table makes
+    this possible; see the block comment above those methods in
+    services.py for the full explanation). This function is kept for
+    bulk/initial backfill (`sync_faiss_index` management command) and as
+    a manual full-resync fallback if the registry and the index ever
+    drift out of sync.
     """
     docs = Document.objects.filter(
         is_active=True,
+        include_in_chatbot=True,
     ).prefetch_related('departments')
 
     docs_info = [
@@ -63,6 +76,35 @@ def sync_vector_store():
         chatbot_service.rebuild_index_from_paths(docs_info)
     except Exception as e:
         print(f"[sync_vector_store] Warning: FAISS index rebuild failed: {e}")
+
+
+def sync_single_document(document):
+    """
+    Targeted FAISS sync for ONE document -- adds/updates its chunks if
+    it's currently active, or removes them if it's not. This is what
+    every per-document action (upload, status toggle, approve, reject,
+    replace) should call instead of the full `sync_vector_store()`
+    rebuild above, so a single document change doesn't re-process every
+    other active document's file all over again.
+
+    Safe to call regardless of `document.is_active`'s new value -- it
+    figures out add vs. remove itself.
+    """
+    try:
+        if document.is_active and document.include_in_chatbot and document.file_url:
+            department_ids = list(document.departments.values_list('id', flat=True))
+            chatbot_service.index_document(
+                doc_id=str(document.id),
+                doc_title=document.title,
+                department_ids=department_ids,
+                path=document.file_url.path,
+            )
+        else:
+            chatbot_service.remove_document(str(document.id))
+    except Exception as e:
+        print(f"[sync_single_document] Warning: FAISS sync failed for "
+              f"doc_id={document.id}: {e}")
+
 
 # Dynamic Daily Limits Logic
 def get_daily_limit(user):
@@ -163,14 +205,27 @@ class ChatAskView(APIView):
             })
 
         except Exception as e:
-            error_reply = f"System mein koi masla aaya hai: {str(e)}"
+            # Log the real exception server-side (stack trace, API errors,
+            # etc.) but never forward raw exception text to the frontend --
+            # it can leak internals (file paths, library names, sometimes
+            # even partial secrets from a failed API call) and is not
+            # something a Worker/Head/Admin user can act on anyway.
+            logger.exception("[ChatAskView] chatbot_service.process_query failed")
+
+            error_reply = (
+                "Maazrat, is waqt AI assistant se jawab nahi mil saka. Baraye "
+                "meherbani thori dair baad dobara koshish karein, ya agar "
+                "masla barqarar rahe to admin se raabta karein."
+            )
             ChatMessage.objects.create(
                 session=session, sender=ChatMessage.Sender.AI, message_text=error_reply,
             )
             return Response({
                 "answer": error_reply,
-                "references": []
-            }, status=500)
+                "intent": "ERROR",
+                "references": [],
+                "success": False,
+            }, status=http_status.HTTP_503_SERVICE_UNAVAILABLE)
 
 
 class ChatNewSessionView(APIView):
@@ -283,6 +338,21 @@ class LeaveApplicationView(APIView):
 
 
 User = get_user_model()
+
+def _friendly_user_save_error(exc: Exception) -> str:
+    """Translates a User create/update failure into a message a Head/Admin
+    can actually act on, instead of forwarding raw Python/DB exception text
+    (e.g. 'UNIQUE constraint failed: users.employee_id' or a Postgres
+    IntegrityError with column/table internals) straight to the frontend."""
+    text = str(exc).lower()
+    if 'employee_id' in text and ('unique' in text or 'duplicate' in text):
+        return "This Employee ID is already assigned to another user."
+    if 'email' in text and ('unique' in text or 'duplicate' in text):
+        return "This email is already in use by another user."
+    if 'unique constraint' in text or 'duplicate key' in text:
+        return "One of the values provided is already in use by another user."
+    return "Could not save this user due to invalid data. Please check the details and try again."
+
 
 def get_client_ip(request):
     x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
@@ -546,7 +616,11 @@ class UserViewSet(viewsets.ModelViewSet):
             serializer = self.get_serializer(user)
             return Response(serializer.data, status=http_status.HTTP_201_CREATED)
         except Exception as e:
-            return Response({"detail": str(e)}, status=http_status.HTTP_400_BAD_REQUEST)
+            logger.exception("[UserViewSet.create] Failed to create user (email=%s)", email)
+            return Response(
+                {"detail": _friendly_user_save_error(e)},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
 
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -585,12 +659,11 @@ class UserViewSet(viewsets.ModelViewSet):
             return Response(serializer.data)
             
         except Exception as e:
-            if 'unique constraint' in str(e).lower() or 'duplicate key' in str(e).lower():
-                return Response(
-                    {"detail": "This email is already in use by another user."}, 
-                    status=http_status.HTTP_400_BAD_REQUEST
-                )
-            return Response({"detail": str(e)}, status=http_status.HTTP_400_BAD_REQUEST)
+            logger.exception("[UserViewSet.update] Failed to update user (id=%s)", instance.pk)
+            return Response(
+                {"detail": _friendly_user_save_error(e)},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
 
     @action(detail=True, methods=['patch'], permission_classes=[IsAdminUser])
     def status(self, request, pk=None):
@@ -760,8 +833,22 @@ class DocumentViewSet(viewsets.ModelViewSet):
         if departments.count() != len(set(dept_ids)):
             raise ValidationError({"departments": "One or more selected departments were not found."})
 
+        # Duplicate-title guard: without this, uploading a second document
+        # with the exact same title as an existing one silently succeeded
+        # (only `doc_number` was ever enforced unique at the DB level).
+        # Case-insensitive and whitespace-trimmed so "Safety Policy" and
+        # " safety policy " are treated as the same title. Deleted
+        # documents don't block re-use, since they're gone from the table.
+        title = (serializer.validated_data.get('title') or '').strip()
+        if title and Document.objects.filter(title__iexact=title).exists():
+            raise ValidationError({
+                "title": f"A document titled '{title}' already exists. "
+                         f"Please use a different title, or replace/update the existing one instead."
+            })
+
         user = self.request.user
-        if user.role in ('DEPARTMENT_HEAD', 'ADMIN') or user.is_superuser:
+        is_privileged = user.role in ('DEPARTMENT_HEAD', 'ADMIN') or user.is_superuser
+        if is_privileged:
             doc = serializer.save(
                 uploaded_by=user,
                 approval_status=Document.ApprovalStatus.APPROVED,
@@ -776,6 +863,17 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
         doc.departments.set(departments)
 
+        # Optional convenience: a Head/Admin can opt this doc into the AI
+        # chatbot's index right at upload time instead of a separate
+        # chatbot_inclusion call afterwards. Anyone else's upload keeps
+        # the model default (False) regardless of what's in the payload --
+        # only a privileged uploader's own choice is honored here.
+        if is_privileged:
+            include_flag = self.request.data.get('include_in_chatbot')
+            if include_flag is not None:
+                doc.include_in_chatbot = str(include_flag).strip().lower() in ('true', '1', 'yes', 'on')
+                doc.save(update_fields=['include_in_chatbot'])
+
         AuditLog.objects.create(
             user=self.request.user,
             action="Uploaded Document",
@@ -784,7 +882,10 @@ class DocumentViewSet(viewsets.ModelViewSet):
             ip_address=get_client_ip(self.request)
         )
 
-        sync_vector_store()
+        # Targeted sync: only indexes this ONE new document (if it's
+        # already active -- Head/Admin uploads are auto-approved) rather
+        # than reprocessing every other active document too.
+        sync_single_document(doc)
 
     def perform_destroy(self, instance):
         AuditLog.objects.create(
@@ -794,8 +895,11 @@ class DocumentViewSet(viewsets.ModelViewSet):
             entity_id=instance.id,
             ip_address=get_client_ip(self.request)
         )
+        doc_id = str(instance.id)
         instance.delete()
-        sync_vector_store()
+        # Not sync_single_document() -- the row is gone, so remove its
+        # chunks unconditionally rather than re-checking is_active.
+        chatbot_service.remove_document(doc_id)
 
     @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def my_uploads(self, request):
@@ -855,7 +959,65 @@ class DocumentViewSet(viewsets.ModelViewSet):
             ip_address=get_client_ip(request)
         )
 
-        sync_vector_store()
+        # Deactivating: removes just this document's chunks from FAISS
+        # (via the doc_id -> chunk_ids registry) -- every other indexed
+        # document is untouched. Reactivating: re-adds them the same way.
+        # No full-index rebuild either way.
+        sync_single_document(document)
+
+        serializer = self.get_serializer(document)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['patch'], permission_classes=[permissions.IsAuthenticated])
+    def chatbot_inclusion(self, request, pk=None):
+        """
+        Toggles whether this document is embedded into the AI chatbot's
+        FAISS knowledge base (Document.include_in_chatbot). Independent of
+        `is_active` (which controls plain read/download visibility) --
+        this only controls whether the AI assistant can retrieve it.
+
+        Restricted to Department Head / Admin / superuser, same privilege
+        gate as the `status` action above -- a Worker (even one with
+        `can_manage_docs`) cannot decide what enters the chatbot's
+        searchable knowledge base.
+        """
+        document = self.get_object()
+        user = request.user
+
+        is_privileged = (
+            user.is_superuser or getattr(user, 'role', None) in ('DEPARTMENT_HEAD', 'ADMIN')
+        )
+        if not is_privileged:
+            raise PermissionDenied(
+                "Only a Department Head or Admin can change a document's "
+                "AI chatbot inclusion."
+            )
+
+        include = request.data.get('include_in_chatbot')
+        if include is None:
+            return Response(
+                {"detail": "'include_in_chatbot' is required."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        document.include_in_chatbot = bool(include)
+        document.save(update_fields=['include_in_chatbot', 'updated_at'])
+
+        action_text = (
+            "Enabled AI Chatbot Indexing" if document.include_in_chatbot
+            else "Disabled AI Chatbot Indexing"
+        )
+        AuditLog.objects.create(
+            user=user,
+            action=action_text,
+            entity_type="Document",
+            entity_id=document.id,
+            ip_address=get_client_ip(request)
+        )
+
+        # Adds/removes just this document's chunks from the appropriate
+        # department shard (or the common shard) -- see services.py.
+        sync_single_document(document)
 
         serializer = self.get_serializer(document)
         return Response(serializer.data)
@@ -910,7 +1072,11 @@ class DocumentViewSet(viewsets.ModelViewSet):
             ip_address=get_client_ip(request),
         )
 
-        sync_vector_store()
+        # index_document() (called via sync_single_document when active)
+        # always drops the old chunks for this doc_id before adding the
+        # new file's chunks, so the swapped-in content replaces the old
+        # one in the index rather than sitting alongside it.
+        sync_single_document(document)
 
         serializer = self.get_serializer(document)
         return Response(serializer.data)
@@ -950,7 +1116,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
             created_by=request.user
         )
         
-        sync_vector_store()
+        sync_single_document(document)
         
         AuditLog.objects.create(
             user=request.user,
@@ -989,7 +1155,11 @@ class DocumentViewSet(viewsets.ModelViewSet):
         document.is_active = False
         document.save(update_fields=['approval_status', 'is_active', 'updated_at'])
 
-        sync_vector_store()
+        # Usually a no-op in FAISS terms -- a PENDING document was never
+        # active/indexed in the first place, so there are no chunks to
+        # remove. Still correct (and cheap) to call: remove_document() is
+        # a safe no-op if the doc_id isn't in the registry.
+        sync_single_document(document)
 
         # Reason is stored in the audit log entry (free-text) and, if
         # given, surfaced to the uploader's department via an Alert --

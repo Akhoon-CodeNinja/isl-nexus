@@ -2,16 +2,14 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 from .views import (
-    CustomTokenObtainPairView, MeView, DepartmentViewSet, DocumentViewSet, 
+    CustomTokenObtainPairView, MeView, DepartmentViewSet, DocumentViewSet,
     TagViewSet, AlertViewSet, ChatMessageViewSet,
     UserViewSet, AuditLogViewSet, SystemSettingsView, MicrosoftLoginView,
-    NotificationTemplateViewSet
+    NotificationTemplateViewSet,
+    ChatAskView, ChatHistoryView, LeaveApplicationView,
+    ChatNewSessionView, ChatSessionListView, ChatSessionDetailView,
+    SystemSyncStatusView,
 )
-
-from .views import ChatAskView, ChatHistoryView, LeaveApplicationView
-from .views import ChatNewSessionView, ChatSessionListView
-
-from .views import ChatNewSessionView, ChatSessionListView, ChatSessionDetailView, SystemSyncStatusView
 
 
 router = DefaultRouter()

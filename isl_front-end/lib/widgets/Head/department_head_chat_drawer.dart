@@ -15,6 +15,7 @@ import 'package:isl_app/core/services/api_service.dart';
 // so the drawer reads as part of the same admin shell rather than a
 // worker-styled overlay.
 // ─────────────────────────────────────────────────────────────────────────────
+/// Shared widget (Department Head) — slide-out drawer listing AI Assistant chat sessions for quick switching.
 class DepartmentHeadChatDrawer extends StatefulWidget {
   const DepartmentHeadChatDrawer({
     super.key,

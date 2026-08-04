@@ -17,6 +17,7 @@ import 'package:isl_app/views/worker/worker_documents_screen.dart';
 // WORKER DOCUMENT TRACKER SCREEN
 // Shows the status of documents uploaded by the signed-in worker.
 // ─────────────────────────────────────────────────────────────────────────────
+/// Worker screen — track the approval status (pending/approved/rejected) of documents they've submitted.
 class WorkerDocumentTrackerScreen extends StatefulWidget {
   const WorkerDocumentTrackerScreen({super.key});
 

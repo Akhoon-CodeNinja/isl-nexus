@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:isl_app/core/models/document_models.dart';
 import 'package:isl_app/core/providers/app_state.dart';
+import 'package:isl_app/core/services/api_service.dart'; // friendlyApiError() for user-facing error text
 import 'package:isl_app/widgets/Admin/admin_sidebar.dart';
 import 'package:isl_app/widgets/Admin/admin_top_header.dart';
 import 'package:isl_app/views/Admin/admin_upload_document_screen.dart';
@@ -25,6 +26,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 // actions. Uploading a *new* document still happens on the separate
 // "Add Document" screen (AdminUploadDocumentScreen).
 // ─────────────────────────────────────────────────────────────────────────────
+/// Admin screen — "My Uploads": documents this Admin has personally uploaded, with status tracking.
 class AdminUploadedDocumentScreen extends StatefulWidget {
   const AdminUploadedDocumentScreen({super.key});
 
@@ -130,7 +132,7 @@ class _AdminUploadedDocumentScreenState
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error opening file: $e')),
+          SnackBar(content: Text('Error opening file: ${friendlyApiError(e)}')),
         );
       }
     }
